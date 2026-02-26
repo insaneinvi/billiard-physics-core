@@ -31,25 +31,18 @@ namespace BilliardPhysics
             for (int i = 0; i < Pockets.Count; i++)
             {
                 PocketData pd = Pockets[i];
-                FixVec2 center = new FixVec2(
-                    Fix64.From((long)(pd.Center.x * 100)) / Fix64.From(100),
-                    Fix64.From((long)(pd.Center.y * 100)) / Fix64.From(100));
-                Fix64 radius = Fix64.From((long)(pd.Radius * 100)) / Fix64.From(100);
+                FixVec2 center = new FixVec2(Fix64.FromFloat(pd.Center.x), Fix64.FromFloat(pd.Center.y));
+                Fix64   radius = Fix64.FromFloat(pd.Radius);
 
                 var pocket = new Pocket(i, center, radius);
-                pocket.ReboundVelocityThreshold =
-                    Fix64.From((long)(pd.ReboundVelocityThreshold * 100)) / Fix64.From(100);
+                pocket.ReboundVelocityThreshold = Fix64.FromFloat(pd.ReboundVelocityThreshold);
 
                 if (pd.RimSegments != null)
                 {
                     foreach (SegmentData sd in pd.RimSegments)
                     {
-                        FixVec2 start = new FixVec2(
-                            Fix64.From((long)(sd.Start.x * 100)) / Fix64.From(100),
-                            Fix64.From((long)(sd.Start.y * 100)) / Fix64.From(100));
-                        FixVec2 end = new FixVec2(
-                            Fix64.From((long)(sd.End.x * 100)) / Fix64.From(100),
-                            Fix64.From((long)(sd.End.y * 100)) / Fix64.From(100));
+                        FixVec2 start = new FixVec2(Fix64.FromFloat(sd.Start.x), Fix64.FromFloat(sd.Start.y));
+                        FixVec2 end   = new FixVec2(Fix64.FromFloat(sd.End.x),   Fix64.FromFloat(sd.End.y));
                         pocket.RimSegments.Add(new Segment(start, end));
                     }
                 }

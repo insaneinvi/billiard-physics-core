@@ -18,7 +18,9 @@ namespace BilliardPhysics
         private static readonly Fix64 CaptureRadiusFactor = Fix64.Half;
 
         // Small epsilon added to remaining time after a collision to avoid re-triggering
-        // the same contact in the next sub-step.
+        // the same contact in the next sub-step.  The value (1e-5 s) is large enough to
+        // push the ball just past the contact surface in fixed-point arithmetic, yet small
+        // enough that it does not visibly affect the simulation at 60 Hz.
         private static readonly Fix64 CollisionEpsilon = Fix64.From(1) / Fix64.From(100000);
 
         // ── Public read-only views ────────────────────────────────────────────────

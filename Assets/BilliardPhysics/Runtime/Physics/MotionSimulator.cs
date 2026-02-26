@@ -6,7 +6,7 @@ namespace BilliardPhysics
     public static class MotionSimulator
     {
         /// <summary>Gravitational deceleration used to scale friction forces (units/s²).</summary>
-        public static Fix64 Gravity = Fix64.From(9);
+        public static readonly Fix64 Gravity = Fix64.From(9);
 
         // Velocity below which we treat the ball as stopped.
         private static readonly Fix64 Epsilon = Fix64.From(1) / Fix64.From(1000);

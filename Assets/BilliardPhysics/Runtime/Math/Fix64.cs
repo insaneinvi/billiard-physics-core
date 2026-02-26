@@ -28,6 +28,21 @@ namespace BilliardPhysics
         public static Fix64 From(int value)  => new Fix64 { RawValue = (long)value * ONE };
         public static Fix64 From(long value) => new Fix64 { RawValue = value * ONE };
 
+        /// <summary>
+        /// Converts a floating-point value from Unity's serialization layer to Fix64.
+        /// Rounds to the nearest fixed-point representable value by scaling through
+        /// an integer with <paramref name="precision"/> decimal digits of accuracy.
+        /// This method is intentionally the only place in the library that touches
+        /// a floating-point type; it must not be used inside the simulation loop.
+        /// </summary>
+        public static Fix64 FromFloat(float value, int precision = 4)
+        {
+            long scale = 1;
+            for (int i = 0; i < precision; i++) scale *= 10;
+            long raw = (long)(value * scale);
+            return From(raw) / From(scale);
+        }
+
         // ── Implicit conversions ──────────────────────────────────────────────────
         public static implicit operator Fix64(int value)  => From(value);
         public static implicit operator Fix64(long value) => From(value);

@@ -21,10 +21,8 @@ namespace BilliardPhysics
             var result = new List<Segment>(Segments.Count);
             foreach (SegmentData sd in Segments)
             {
-                FixVec2 start = new FixVec2(Fix64.From((long)(sd.Start.x * 100)) / Fix64.From(100),
-                                            Fix64.From((long)(sd.Start.y * 100)) / Fix64.From(100));
-                FixVec2 end   = new FixVec2(Fix64.From((long)(sd.End.x   * 100)) / Fix64.From(100),
-                                            Fix64.From((long)(sd.End.y   * 100)) / Fix64.From(100));
+                FixVec2 start = new FixVec2(Fix64.FromFloat(sd.Start.x), Fix64.FromFloat(sd.Start.y));
+                FixVec2 end   = new FixVec2(Fix64.FromFloat(sd.End.x),   Fix64.FromFloat(sd.End.y));
                 result.Add(new Segment(start, end));
             }
             return result;
