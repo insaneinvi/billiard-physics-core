@@ -1,0 +1,14 @@
+{
+    "name": "BilliardPhysics.Editor",
+    "rootNamespace": "BilliardPhysics.Editor",
+    "references": ["BilliardPhysics.Runtime"],
+    "includePlatforms": ["Editor"],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
