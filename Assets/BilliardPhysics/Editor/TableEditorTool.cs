@@ -10,12 +10,20 @@ namespace BilliardPhysics.Editor
     {
         private int _selectedSegment = -1;
 
+        // Length Constraint Mode – editor-only, never saved to the ScriptableObject.
+        private bool _lengthConstraintEnabled = false;
+
         private SerializedProperty _segsProp;
 
         private static readonly Color s_unselectedColor = Color.green;
         private static readonly Color s_selectedColor   = Color.cyan;
         private static readonly Color s_normalColor     = Color.blue;
         private static readonly Color s_handleColor     = Color.white;
+
+        private static readonly GUIStyle s_labelStyle = new GUIStyle
+        {
+            normal = { textColor = Color.yellow }
+        };
 
         private void OnEnable()
         {
@@ -28,6 +36,22 @@ namespace BilliardPhysics.Editor
 
             TableDefinition table = (TableDefinition)target;
             serializedObject.Update();
+
+            EditorGUILayout.Space();
+
+            // ── Length Constraint Mode toggle ────────────────────────────
+            _lengthConstraintEnabled = EditorGUILayout.ToggleLeft(
+                "Length Constraint Mode",
+                _lengthConstraintEnabled);
+
+            if (_lengthConstraintEnabled)
+            {
+                EditorGUILayout.HelpBox(
+                    "Dragging Start repositions End to maintain the segment length.\n" +
+                    "Dragging End repositions Start to maintain the segment length.\n" +
+                    "Length is calculated in the Editor only and is not saved.",
+                    MessageType.Info);
+            }
 
             EditorGUILayout.Space();
 
@@ -89,6 +113,15 @@ namespace BilliardPhysics.Editor
                 Handles.DrawLine(mid, mid + normal * 0.3f);
                 Handles.ArrowHandleCap(0, mid + normal * 0.3f, Quaternion.LookRotation(normal), 0.1f, EventType.Repaint);
 
+                // Optional length and angle labels (only in Length Constraint Mode).
+                if (_lengthConstraintEnabled)
+                {
+                    float   length = (end - start).magnitude;
+                    float   angle  = Mathf.Atan2(ev.y - sv.y, ev.x - sv.x) * Mathf.Rad2Deg;
+                    string  label  = string.Format("L:{0:F3}  A:{1:F1}°", length, angle);
+                    Handles.Label(mid, label, s_labelStyle);
+                }
+
                 // Editable start endpoint.
                 Handles.color = s_handleColor;
                 EditorGUI.BeginChangeCheck();
@@ -96,7 +129,21 @@ namespace BilliardPhysics.Editor
                 if (EditorGUI.EndChangeCheck())
                 {
                     Undo.RecordObject(table, "Move Segment Start");
+
+                    Vector2 newEndV = ev; // default: end unchanged
+                    if (_lengthConstraintEnabled)
+                    {
+                        // Keep length: reposition end along the original direction from the new start.
+                        float   length  = (end - start).magnitude;
+                        Vector3 dir     = (end - start);
+                        Vector3 newEnd3 = dir.sqrMagnitude > 1e-6f
+                            ? newStart + dir.normalized * length
+                            : newStart + Vector3.right * length;
+                        newEndV = new Vector2(newEnd3.x, newEnd3.y);
+                    }
                     startProp.vector2Value = new Vector2(newStart.x, newStart.y);
+                    endProp.vector2Value   = newEndV;
+
                     _selectedSegment = i;
                     changed = true;
                 }
@@ -107,7 +154,21 @@ namespace BilliardPhysics.Editor
                 if (EditorGUI.EndChangeCheck())
                 {
                     Undo.RecordObject(table, "Move Segment End");
-                    endProp.vector2Value = new Vector2(newEnd.x, newEnd.y);
+
+                    Vector2 newStartV = sv; // default: start unchanged
+                    if (_lengthConstraintEnabled)
+                    {
+                        // Keep length: reposition start along the direction from new end toward old start.
+                        float   length    = (end - start).magnitude;
+                        Vector3 newDir    = newEnd - start;
+                        Vector3 newStart3 = newDir.sqrMagnitude > 1e-6f
+                            ? newEnd - newDir.normalized * length
+                            : newEnd - Vector3.right * length;
+                        newStartV = new Vector2(newStart3.x, newStart3.y);
+                    }
+                    endProp.vector2Value   = new Vector2(newEnd.x, newEnd.y);
+                    startProp.vector2Value = newStartV;
+
                     _selectedSegment = i;
                     changed = true;
                 }
