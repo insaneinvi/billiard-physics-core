@@ -1,0 +1,14 @@
+{
+    "name": "BilliardPhysics.Runtime",
+    "rootNamespace": "BilliardPhysics",
+    "references": [],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
