@@ -30,6 +30,15 @@ namespace BilliardPhysics.Editor
         private bool    _waitingForEnd = false;
         private Vector2 _addStartPos;
 
+        // ── Length Constraint Mode (editor-only, never serialized) ────────
+        private bool    _lengthConstraintEnabled = false;
+        private float[] _segmentLengths          = System.Array.Empty<float>();
+
+        // Threshold for treating a segment as degenerate (squared length).
+        private const float k_minSegLenSq = 1e-6f;
+        // Fallback direction used when a segment is degenerate.
+        private static readonly Vector2 k_defaultSegDir = Vector2.right;
+
         // ── Cached serialized properties (set once in OnEnable) ───────────
         private SerializedProperty _tableSegsProp;
         private SerializedProperty _pocketsProp;
@@ -39,12 +48,97 @@ namespace BilliardPhysics.Editor
             SerializedProperty tableProp = serializedObject.FindProperty("Table");
             _tableSegsProp = tableProp?.FindPropertyRelative("Segments");
             _pocketsProp   = serializedObject.FindProperty("Pockets");
+            SyncSegmentLengths();
+        }
+
+        // Keep _segmentLengths in sync with the number of table segments.
+        // New entries are initialised from the current Start/End distance.
+        private void SyncSegmentLengths()
+        {
+            if (_tableSegsProp == null) return;
+            int count = _tableSegsProp.arraySize;
+            if (_segmentLengths.Length == count) return;
+
+            float[] next = new float[count];
+            for (int i = 0; i < count; i++)
+            {
+                if (i < _segmentLengths.Length)
+                {
+                    next[i] = _segmentLengths[i];
+                }
+                else
+                {
+                    SerializedProperty seg = _tableSegsProp.GetArrayElementAtIndex(i);
+                    SerializedProperty sp  = seg.FindPropertyRelative("Start");
+                    SerializedProperty ep  = seg.FindPropertyRelative("End");
+                    next[i] = (sp != null && ep != null)
+                        ? (ep.vector2Value - sp.vector2Value).magnitude
+                        : 0f;
+                }
+            }
+            _segmentLengths = next;
         }
 
         // ── Inspector GUI ─────────────────────────────────────────────────
         public override void OnInspectorGUI()
         {
             DrawDefaultInspector();
+
+            // Keep lengths array in sync after default inspector may have changed array size.
+            SyncSegmentLengths();
+
+            // ── Length Constraint Mode ────────────────────────────────────
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("Length Constraint", EditorStyles.boldLabel);
+            _lengthConstraintEnabled = EditorGUILayout.ToggleLeft(
+                "Length Constraint Mode", _lengthConstraintEnabled);
+
+            if (_lengthConstraintEnabled)
+            {
+                EditorGUILayout.HelpBox(
+                    "Move Start → End is repositioned to keep the segment length constant.\n" +
+                    "Move End   → Start is fixed; End is projected onto the circle of the given radius.\n" +
+                    "Edit Length below → End is recalculated so Start→End equals the new length.\n" +
+                    "Length is editor-only and is never saved to the runtime data.",
+                    MessageType.Info);
+
+                if (_tableSegsProp != null)
+                {
+                    for (int i = 0; i < _tableSegsProp.arraySize; i++)
+                    {
+                        float prevLen = _segmentLengths[i];
+                        float newLen  = EditorGUILayout.FloatField("Segment " + i + " Length", prevLen);
+
+                        bool invalid = float.IsNaN(newLen) || float.IsInfinity(newLen) || newLen < 0f;
+                        if (invalid)
+                        {
+                            EditorGUILayout.HelpBox(
+                                "Segment " + i + ": Length must be a non-negative finite number.",
+                                MessageType.Warning);
+                        }
+                        else if (!Mathf.Approximately(newLen, prevLen))
+                        {
+                            SerializedProperty seg = _tableSegsProp.GetArrayElementAtIndex(i);
+                            SerializedProperty sp  = seg.FindPropertyRelative("Start");
+                            SerializedProperty ep  = seg.FindPropertyRelative("End");
+                            if (sp != null && ep != null)
+                            {
+                                Vector2 sv  = sp.vector2Value;
+                                Vector2 dir = ep.vector2Value - sv;
+                                Vector2 newEnd = dir.sqrMagnitude > k_minSegLenSq
+                                    ? sv + dir.normalized * newLen
+                                    : sv + k_defaultSegDir * newLen;
+
+                                Undo.RecordObject(target, "Change Segment Length");
+                                ep.vector2Value = newEnd;
+                                serializedObject.ApplyModifiedProperties();
+                                EditorUtility.SetDirty(target);
+                                _segmentLengths[i] = newLen;
+                            }
+                        }
+                    }
+                }
+            }
 
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Table Segments", EditorStyles.boldLabel);
@@ -131,6 +225,7 @@ namespace BilliardPhysics.Editor
             if (_tableSegsProp == null || _pocketsProp == null) return;
 
             serializedObject.Update();
+            SyncSegmentLengths();
 
             Event e       = Event.current;
             bool  changed = false;
@@ -250,7 +345,19 @@ namespace BilliardPhysics.Editor
                 if (EditorGUI.EndChangeCheck())
                 {
                     Undo.RecordObject(target, "Move Table Segment Start");
-                    startProp.vector2Value = new Vector2(newS.x, newS.y);
+                    Vector2 newStartV = new Vector2(newS.x, newS.y);
+                    Vector2 newEndV   = ev; // default: end unchanged
+                    if (_lengthConstraintEnabled && i < _segmentLengths.Length)
+                    {
+                        // Keep length: reposition End along the original direction from the new Start.
+                        float   segLen = _segmentLengths[i];
+                        Vector2 dir    = ev - sv;
+                        newEndV = dir.sqrMagnitude > k_minSegLenSq
+                            ? newStartV + dir.normalized * segLen
+                            : newStartV + k_defaultSegDir * segLen;
+                    }
+                    startProp.vector2Value = newStartV;
+                    endProp.vector2Value   = newEndV;
                     _selKind    = SelectionKind.TableSegment;
                     _selPrimary = i;
                     changed     = true;
@@ -261,7 +368,18 @@ namespace BilliardPhysics.Editor
                 if (EditorGUI.EndChangeCheck())
                 {
                     Undo.RecordObject(target, "Move Table Segment End");
-                    endProp.vector2Value = new Vector2(newE.x, newE.y);
+                    Vector2 newEndV = new Vector2(newE.x, newE.y);
+                    if (_lengthConstraintEnabled && i < _segmentLengths.Length)
+                    {
+                        // Keep Start and length fixed; project End onto the circle of radius segLen.
+                        float   segLen = _segmentLengths[i];
+                        Vector2 drag   = new Vector2(newE.x, newE.y);
+                        Vector2 dir    = drag - sv;
+                        newEndV = dir.sqrMagnitude > k_minSegLenSq
+                            ? sv + dir.normalized * segLen
+                            : sv + k_defaultSegDir * segLen;
+                    }
+                    endProp.vector2Value = newEndV;
                     _selKind    = SelectionKind.TableSegment;
                     _selPrimary = i;
                     changed     = true;
