@@ -23,6 +23,12 @@ namespace BilliardPhysics.Editor
         private int           _selPrimary = -1; // table segment idx or pocket idx
         private int           _selRim     = -1; // rim segment idx inside pocket
 
+        // Sub-element selection within a rim segment (Start or End point).
+        // When set, the Delete key promotes from ConnectionPoints instead of
+        // deleting the whole segment (see TryDeleteSelected / RimSegmentHelper).
+        private enum SelectionPoint { None, SegStart, SegEnd }
+        private SelectionPoint _selPointKind = SelectionPoint.None;
+
         // ── Optimization-panel selection state ────────────────────────────
         // Tracks which element was selected in the Table Segments / Pocket Segments
         // optimization panel. Kept separate from _selKind so the two features
@@ -179,8 +185,7 @@ namespace BilliardPhysics.Editor
 
             // ── Table Segments element selection (optimization panel) ─────
             // Selecting an element highlights the corresponding line segment in
-            // the Scene view with a bright yellow overlay.  This is independent
-            // of the unified "Table → Elements" list below.
+            // the Scene view with a bright yellow overlay.
             if (_tableSegsProp != null)
             {
                 for (int i = 0; i < _tableSegsProp.arraySize; i++)
@@ -302,6 +307,53 @@ namespace BilliardPhysics.Editor
                             SceneView.RepaintAll();
                         }
                         GUI.color = Color.white;
+
+                        // ── Remove End / Remove Start ─────────────────────────
+                        // Promotes the last/first ConnectionPoint to End/Start and
+                        // removes it from the ConnectionPoints list.  Blocked (with
+                        // a warning) when ConnectionPoints is empty so the segment
+                        // cannot degenerate to a single point.
+                        var auth2 = (TableAndPocketAuthoring)target;
+                        var segData = auth2.Pockets[i].RimSegments[j];
+
+                        EditorGUILayout.BeginHorizontal();
+                        if (GUILayout.Button("Remove End"))
+                        {
+                            Undo.RecordObject(target, "Remove Rim Segment End");
+                            bool ok = RimSegmentHelper.TryPromoteLastCPToEnd(segData);
+                            if (ok)
+                            {
+                                serializedObject.Update();
+                                EditorUtility.SetDirty(target);
+                                SceneView.RepaintAll();
+                            }
+                            else
+                            {
+                                Debug.LogWarning(
+                                    "[BilliardPhysics] Cannot remove End of Pocket " + i +
+                                    " Rim " + j + ": ConnectionPoints is empty. " +
+                                    "Add intermediate points before removing End.");
+                            }
+                        }
+                        if (GUILayout.Button("Remove Start"))
+                        {
+                            Undo.RecordObject(target, "Remove Rim Segment Start");
+                            bool ok = RimSegmentHelper.TryPromoteFirstCPToStart(segData);
+                            if (ok)
+                            {
+                                serializedObject.Update();
+                                EditorUtility.SetDirty(target);
+                                SceneView.RepaintAll();
+                            }
+                            else
+                            {
+                                Debug.LogWarning(
+                                    "[BilliardPhysics] Cannot remove Start of Pocket " + i +
+                                    " Rim " + j + ": ConnectionPoints is empty. " +
+                                    "Add intermediate points before removing Start.");
+                            }
+                        }
+                        EditorGUILayout.EndHorizontal();
                     }
                 }
             }
@@ -319,67 +371,6 @@ namespace BilliardPhysics.Editor
                     _addMode       = AddMode.None;
                     _waitingForEnd = false;
                     SceneView.RepaintAll();
-                }
-            }
-
-            // ── Inspector Element Selection (unified Table → Elements list) ──
-            EditorGUILayout.Space();
-            EditorGUILayout.LabelField("Table → Elements", EditorStyles.boldLabel);
-            EditorGUILayout.HelpBox(
-                "Click an element to select it – the corresponding line turns red in the Scene.",
-                MessageType.None);
-
-            // Table segments
-            if (_tableSegsProp != null)
-            {
-                for (int i = 0; i < _tableSegsProp.arraySize; i++)
-                {
-                    bool isSel = (_selKind == SelectionKind.TableSegment && _selPrimary == i);
-                    GUI.color = isSel ? Color.red : Color.white;
-                    if (GUILayout.Button("Table: Segment " + i + (isSel ? " (selected)" : "")))
-                    {
-                        if (isSel)
-                            ClearSelection();
-                        else
-                        {
-                            _selKind    = SelectionKind.TableSegment;
-                            _selPrimary = i;
-                            _selRim     = -1;
-                        }
-                        SceneView.RepaintAll();
-                    }
-                    GUI.color = Color.white;
-                }
-            }
-
-            // Pocket rim segments (all pockets, flat list)
-            if (_pocketsProp != null)
-            {
-                for (int i = 0; i < _pocketsProp.arraySize; i++)
-                {
-                    SerializedProperty pocket   = _pocketsProp.GetArrayElementAtIndex(i);
-                    SerializedProperty rimsProp = pocket.FindPropertyRelative("RimSegments");
-                    if (rimsProp == null || rimsProp.arraySize == 0) continue;
-
-                    for (int j = 0; j < rimsProp.arraySize; j++)
-                    {
-                        bool rimSel = (_selKind == SelectionKind.PocketRimSegment &&
-                                       _selPrimary == i && _selRim == j);
-                        GUI.color = rimSel ? Color.red : Color.white;
-                        if (GUILayout.Button("Pocket " + i + ": Rim " + j + (rimSel ? " (selected)" : "")))
-                        {
-                            if (rimSel)
-                                ClearSelection();
-                            else
-                            {
-                                _selKind    = SelectionKind.PocketRimSegment;
-                                _selPrimary = i;
-                                _selRim     = j;
-                            }
-                            SceneView.RepaintAll();
-                        }
-                        GUI.color = Color.white;
-                    }
                 }
             }
 
@@ -728,29 +719,54 @@ namespace BilliardPhysics.Editor
                     Handles.color = rimSel ? s_pocketRimSelColor : s_pocketRimColor;
                     DrawPolylineHandles(rs, re, rimCps);
 
-                    // Clickable midpoint for selection
+                    // Clickable midpoint selects the whole segment (clears point sub-selection).
                     Vector3 rimMid  = (rs + re) * 0.5f;
                     float   rimDot  = HandleUtility.GetHandleSize(rimMid) * 0.08f;
                     if (Handles.Button(rimMid, Quaternion.identity, rimDot, rimDot,
                                        Handles.DotHandleCap))
                     {
-                        _selKind    = SelectionKind.PocketRimSegment;
-                        _selPrimary = i;
-                        _selRim     = j;
+                        _selKind      = SelectionKind.PocketRimSegment;
+                        _selPrimary   = i;
+                        _selRim       = j;
+                        _selPointKind = SelectionPoint.None;
                     }
 
-                    // Endpoint position handles
+                    // Endpoint position handles.
+                    // Small clickable dots allow selecting Start/End without dragging,
+                    // enabling point-level deletion (Delete key → CP promotion).
                     Handles.color = s_handleColor;
+
+                    float dotSizeS = HandleUtility.GetHandleSize(rs) * 0.06f;
+                    if (Handles.Button(rs, Quaternion.identity, dotSizeS, dotSizeS,
+                                       Handles.DotHandleCap))
+                    {
+                        _selKind      = SelectionKind.PocketRimSegment;
+                        _selPrimary   = i;
+                        _selRim       = j;
+                        _selPointKind = SelectionPoint.SegStart;
+                    }
+
                     EditorGUI.BeginChangeCheck();
                     Vector3 newRs = Handles.PositionHandle(rs, Quaternion.identity);
                     if (EditorGUI.EndChangeCheck())
                     {
                         Undo.RecordObject(target, "Move Rim Segment Start");
                         rimStart.vector2Value = new Vector2(newRs.x, newRs.y);
-                        _selKind    = SelectionKind.PocketRimSegment;
-                        _selPrimary = i;
-                        _selRim     = j;
-                        changed     = true;
+                        _selKind      = SelectionKind.PocketRimSegment;
+                        _selPrimary   = i;
+                        _selRim       = j;
+                        _selPointKind = SelectionPoint.SegStart;
+                        changed       = true;
+                    }
+
+                    float dotSizeE = HandleUtility.GetHandleSize(re) * 0.06f;
+                    if (Handles.Button(re, Quaternion.identity, dotSizeE, dotSizeE,
+                                       Handles.DotHandleCap))
+                    {
+                        _selKind      = SelectionKind.PocketRimSegment;
+                        _selPrimary   = i;
+                        _selRim       = j;
+                        _selPointKind = SelectionPoint.SegEnd;
                     }
 
                     EditorGUI.BeginChangeCheck();
@@ -759,10 +775,11 @@ namespace BilliardPhysics.Editor
                     {
                         Undo.RecordObject(target, "Move Rim Segment End");
                         rimEnd.vector2Value = new Vector2(newRe.x, newRe.y);
-                        _selKind    = SelectionKind.PocketRimSegment;
-                        _selPrimary = i;
-                        _selRim     = j;
-                        changed     = true;
+                        _selKind      = SelectionKind.PocketRimSegment;
+                        _selPrimary   = i;
+                        _selRim       = j;
+                        _selPointKind = SelectionPoint.SegEnd;
+                        changed       = true;
                     }
 
                     // Connection point position handles
@@ -780,10 +797,11 @@ namespace BilliardPhysics.Editor
                             {
                                 Undo.RecordObject(target, "Move Rim Segment Connection Point");
                                 cp.vector2Value = new Vector2(newCp.x, newCp.y);
-                                _selKind    = SelectionKind.PocketRimSegment;
-                                _selPrimary = i;
-                                _selRim     = j;
-                                changed     = true;
+                                _selKind      = SelectionKind.PocketRimSegment;
+                                _selPrimary   = i;
+                                _selRim       = j;
+                                _selPointKind = SelectionPoint.None;
+                                changed       = true;
                             }
                         }
                     }
@@ -874,9 +892,10 @@ namespace BilliardPhysics.Editor
 
         private void ClearSelection()
         {
-            _selKind    = SelectionKind.None;
-            _selPrimary = -1;
-            _selRim     = -1;
+            _selKind      = SelectionKind.None;
+            _selPrimary   = -1;
+            _selRim       = -1;
+            _selPointKind = SelectionPoint.None;
         }
 
         private void ClearOptSelection()
@@ -976,6 +995,49 @@ namespace BilliardPhysics.Editor
                 SerializedProperty rimsProp = pocket.FindPropertyRelative("RimSegments");
                 if (rimsProp != null && _selRim >= 0 && _selRim < rimsProp.arraySize)
                 {
+                    // Point-level deletion: promote from ConnectionPoints instead of
+                    // deleting the whole segment.
+                    if (_selPointKind == SelectionPoint.SegEnd)
+                    {
+                        var auth = (TableAndPocketAuthoring)target;
+                        var segData = auth.Pockets[_selPrimary].RimSegments[_selRim];
+                        Undo.RecordObject(target, "Remove Rim Segment End");
+                        bool ok = RimSegmentHelper.TryPromoteLastCPToEnd(segData);
+                        if (ok)
+                        {
+                            serializedObject.Update();
+                            _selPointKind = SelectionPoint.None;
+                        }
+                        else
+                        {
+                            Debug.LogWarning(
+                                "[BilliardPhysics] Cannot remove End: ConnectionPoints is empty. " +
+                                "Add intermediate points before removing End.");
+                        }
+                        return ok;
+                    }
+
+                    if (_selPointKind == SelectionPoint.SegStart)
+                    {
+                        var auth = (TableAndPocketAuthoring)target;
+                        var segData = auth.Pockets[_selPrimary].RimSegments[_selRim];
+                        Undo.RecordObject(target, "Remove Rim Segment Start");
+                        bool ok = RimSegmentHelper.TryPromoteFirstCPToStart(segData);
+                        if (ok)
+                        {
+                            serializedObject.Update();
+                            _selPointKind = SelectionPoint.None;
+                        }
+                        else
+                        {
+                            Debug.LogWarning(
+                                "[BilliardPhysics] Cannot remove Start: ConnectionPoints is empty. " +
+                                "Add intermediate points before removing Start.");
+                        }
+                        return ok;
+                    }
+
+                    // No sub-element selected: delete the whole rim segment.
                     Undo.RecordObject(target, "Delete Pocket Rim Segment");
                     rimsProp.DeleteArrayElementAtIndex(_selRim);
                     ClearSelection();
