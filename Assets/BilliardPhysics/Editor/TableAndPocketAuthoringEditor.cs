@@ -698,30 +698,25 @@ namespace BilliardPhysics.Editor
                 pts[k] = center + new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * radius;
             }
 
-            // Randomly select Start and End (different indices).
+            // Randomly select a single index; Start and End are the same point.
+            // Invariant: Start == End, and ConnectionPoints holds all N-1 other points.
             // To use a deterministic seed, call UnityEngine.Random.InitState(seed) before this.
-            int startIdx  = UnityEngine.Random.Range(0, N);
-            int endOffset = UnityEngine.Random.Range(1, N); // 1..N-1 guarantees endIdx != startIdx
-            int endIdx    = (startIdx + endOffset) % N;
+            int idx = UnityEngine.Random.Range(0, N);
 
-            // Build ConnectionPoints in clockwise order (decreasing index with wrap)
-            // starting just after Start and stopping just before End.
-            // Points were generated in CCW order (increasing index), so clockwise means
-            // decreasing index: startIdx-1 is the first CW-adjacent point after Start.
-            var cpList = new System.Collections.Generic.List<Vector2>(N - 2);
-            int cur = (startIdx - 1 + N) % N;
-            while (cur != endIdx)
-            {
-                cpList.Add(pts[cur]);
-                cur = (cur - 1 + N) % N;
-            }
+            // Build ConnectionPoints in clockwise order (decreasing index with wrap):
+            // idx-1, idx-2, …, idx+1 — all N-1 remaining points, no duplicates.
+            // Points were generated in CCW order (increasing angle/index), so clockwise
+            // traversal means decreasing index.
+            var cpList = new System.Collections.Generic.List<Vector2>(N - 1);
+            for (int i = 1; i < N; i++)
+                cpList.Add(pts[(idx - i + N) % N]);
 
             Undo.RecordObject(target, "Generate Pocket Rim From Circle");
             pocket.RimSegments.Clear();
             pocket.RimSegments.Add(new SegmentData
             {
-                Start            = pts[startIdx],
-                End              = pts[endIdx],
+                Start            = pts[idx],
+                End              = pts[idx],
                 ConnectionPoints = cpList,
             });
             serializedObject.Update();
