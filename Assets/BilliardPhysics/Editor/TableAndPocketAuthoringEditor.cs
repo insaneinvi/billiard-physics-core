@@ -1,4 +1,5 @@
 #if UNITY_EDITOR
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEditor;
 
@@ -270,12 +271,16 @@ namespace BilliardPhysics.Editor
                 }
             }
 
-            // ── Fixed-Point Binary Export ─────────────────────────────────
+            // ── Fixed-Point Binary Export / Import ────────────────────────
             EditorGUILayout.Space();
-            EditorGUILayout.LabelField("Export", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Export / Import", EditorStyles.boldLabel);
             if (GUILayout.Button("Export Fixed Binary (.bytes)"))
             {
                 ExportFixedBinary();
+            }
+            if (GUILayout.Button("Load Export Fixed Binary..."))
+            {
+                LoadFixedBinary();
             }
         }
 
@@ -357,7 +362,120 @@ namespace BilliardPhysics.Editor
             Debug.Log($"[BilliardPhysics] Exported fixed-point binary to {path}");
         }
 
-        // ── Scene GUI ─────────────────────────────────────────────────────
+        // ── Fixed-Point Binary Import ──────────────────────────────────────
+        private void LoadFixedBinary()
+        {
+            string path = EditorUtility.OpenFilePanel("Load Export Fixed Binary", "", "bytes");
+            if (string.IsNullOrEmpty(path)) return; // user cancelled
+
+            if (EditorUtility.IsDirty(target))
+            {
+                bool discard = EditorUtility.DisplayDialog(
+                    "Load Export Fixed Binary",
+                    "The current data has unsaved changes. Discard them and load the selected file?",
+                    "Discard",
+                    "Cancel");
+                if (!discard) return;
+            }
+
+            byte[] bytes;
+            try
+            {
+                bytes = System.IO.File.ReadAllBytes(path);
+            }
+            catch (System.Exception ex)
+            {
+                EditorUtility.DisplayDialog(
+                    "Load Export Fixed Binary \u2014 Error",
+                    $"Could not read file:\n{path}\n\nReason: {ex.Message}",
+                    "OK");
+                return;
+            }
+
+            List<Segment> tableSegments;
+            List<Pocket>  pockets;
+            try
+            {
+                TableAndPocketBinaryLoader.Load(bytes, out tableSegments, out pockets);
+            }
+            catch (System.IO.InvalidDataException ex)
+            {
+                EditorUtility.DisplayDialog(
+                    "Load Export Fixed Binary \u2014 Error",
+                    $"File format error:\n{path}\n\nReason: {ex.Message}",
+                    "OK");
+                return;
+            }
+            catch (System.Exception ex)
+            {
+                EditorUtility.DisplayDialog(
+                    "Load Export Fixed Binary \u2014 Error",
+                    $"Unexpected error while loading:\n{path}\n\nReason: {ex.Message}",
+                    "OK");
+                return;
+            }
+
+            var auth = (TableAndPocketAuthoring)target;
+            Undo.RecordObject(target, "Load Fixed Binary");
+            auth.Table   = BuildTableConfig(tableSegments);
+            auth.Pockets = BuildPocketConfigs(pockets);
+            serializedObject.Update();
+            EditorUtility.SetDirty(target);
+            SyncSegmentLengths();
+            SyncRimGenArrays();
+            ClearSelection();
+            SceneView.RepaintAll();
+            Debug.Log($"[BilliardPhysics] Loaded fixed-point binary from {path}");
+        }
+
+        // Converts a Fix64 raw value back to float (32.32 fixed-point).
+        private static float Fix64ToFloat(Fix64 value)
+        {
+            return (float)((double)value.RawValue / (1L << 32));
+        }
+
+        // Converts a list of runtime Segments to a TableConfig (one SegmentData per segment).
+        private static TableConfig BuildTableConfig(List<Segment> segments)
+        {
+            var segsData = new List<SegmentData>(segments.Count);
+            foreach (var seg in segments)
+            {
+                segsData.Add(new SegmentData
+                {
+                    Start = new Vector2(Fix64ToFloat(seg.Start.X), Fix64ToFloat(seg.Start.Y)),
+                    End   = new Vector2(Fix64ToFloat(seg.End.X),   Fix64ToFloat(seg.End.Y)),
+                });
+            }
+            return new TableConfig { Segments = segsData };
+        }
+
+        // Converts a list of runtime Pockets to PocketConfig objects (one SegmentData per rim segment).
+        private static List<PocketConfig> BuildPocketConfigs(List<Pocket> pockets)
+        {
+            var result = new List<PocketConfig>(pockets.Count);
+            foreach (var pocket in pockets)
+            {
+                var rimSegs = new List<SegmentData>(pocket.RimSegments.Count);
+                foreach (var rim in pocket.RimSegments)
+                {
+                    rimSegs.Add(new SegmentData
+                    {
+                        Start = new Vector2(Fix64ToFloat(rim.Start.X), Fix64ToFloat(rim.Start.Y)),
+                        End   = new Vector2(Fix64ToFloat(rim.End.X),   Fix64ToFloat(rim.End.Y)),
+                    });
+                }
+                result.Add(new PocketConfig
+                {
+                    Center                   = new Vector2(Fix64ToFloat(pocket.Center.X), Fix64ToFloat(pocket.Center.Y)),
+                    Radius                   = Fix64ToFloat(pocket.Radius),
+                    ReboundVelocityThreshold = Fix64ToFloat(pocket.ReboundVelocityThreshold),
+                    RimSegments              = rimSegs,
+                });
+            }
+            return result;
+        }
+
+
         private void OnSceneGUI()
         {
             if (_tableSegsProp == null || _pocketsProp == null) return;
