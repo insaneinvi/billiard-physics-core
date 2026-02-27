@@ -293,73 +293,138 @@ namespace BilliardPhysics.Editor
         {
             var auth = (TableAndPocketAuthoring)target;
 
-            const string dir = "Assets/Data";
-            if (!System.IO.Directory.Exists(dir))
-                System.IO.Directory.CreateDirectory(dir);
-
-            // Sanitize the GameObject name so it is safe to use as a file name.
-            string safeName = string.Concat(
+            // Build a sanitized default name from the GameObject name.
+            string defaultName = string.Concat(
                 auth.gameObject.name.Split(System.IO.Path.GetInvalidFileNameChars()));
-            if (string.IsNullOrEmpty(safeName)) safeName = "table";
-            string path = System.IO.Path.Combine(dir, safeName + ".bytes");
+            if (string.IsNullOrEmpty(defaultName)) defaultName = "table";
 
-            using (var writer = new System.IO.BinaryWriter(
-                       System.IO.File.Open(path, System.IO.FileMode.Create)))
+            // ── Step 1: Let the user choose the export folder and file name ──
+            string path = EditorUtility.SaveFilePanel(
+                "Export Fixed Binary",
+                "",           // default directory (OS remembers last used)
+                defaultName,  // default file name (without extension)
+                "bytes");     // extension filter
+
+            if (string.IsNullOrEmpty(path))
+                return; // user cancelled
+
+            // ── Step 2: Normalize the extension to .bytes ────────────────────
+            string dir      = System.IO.Path.GetDirectoryName(path);
+            string fileName = ExportFixedBinaryHelper.NormalizeExtension(
+                                  System.IO.Path.GetFileName(path));
+            path = System.IO.Path.Combine(dir, fileName);
+
+            // ── Step 3: Validate the file name ───────────────────────────────
+            if (!ExportFixedBinaryHelper.ValidateFileName(fileName, out string validationError))
             {
-                // Header
-                writer.Write(k_exportMagic);
-                writer.Write(k_exportVersion);
+                EditorUtility.DisplayDialog(
+                    "Export Fixed Binary \u2014 Invalid File Name",
+                    validationError,
+                    "OK");
+                return;
+            }
 
-                // Table segments – expand each SegmentData polyline into sub-segments.
-                var segs = auth.Table.Segments;
-                var expandedTableSegs = new System.Collections.Generic.List<(Vector2 a, Vector2 b)>();
-                foreach (var seg in segs)
+            // ── Step 4: Overwrite confirmation ───────────────────────────────
+            if (System.IO.File.Exists(path))
+            {
+                bool overwrite = EditorUtility.DisplayDialog(
+                    "Export Fixed Binary \u2014 File Exists",
+                    $"The following file already exists:\n{path}\n\nDo you want to overwrite it?",
+                    "Overwrite",
+                    "Cancel");
+                if (!overwrite) return;
+            }
+
+            // ── Step 5: Serialise and write ───────────────────────────────────
+            try
+            {
+                using (var writer = new System.IO.BinaryWriter(
+                           System.IO.File.Open(path, System.IO.FileMode.Create)))
                 {
-                    var pts = BuildPolylinePoints(seg.Start, seg.End, seg.ConnectionPoints);
-                    for (int k = 0; k < pts.Count - 1; k++)
-                        expandedTableSegs.Add((pts[k], pts[k + 1]));
+                    WriteFixedBinaryBody(writer, auth);
                 }
-                writer.Write(expandedTableSegs.Count);
-                foreach (var sub in expandedTableSegs)
+            }
+            catch (System.Exception ex)
+            {
+                EditorUtility.DisplayDialog(
+                    "Export Fixed Binary \u2014 Error",
+                    $"Could not write file:\n{path}\n\nReason: {ex.Message}",
+                    "OK");
+                return;
+            }
+
+            // Refresh AssetDatabase so the file appears in the Project view when
+            // the export target is inside the project folder.
+            AssetDatabase.Refresh();
+            Debug.Log($"[BilliardPhysics] Exported fixed-point binary to {path}");
+
+            // ── Step 6: Success – offer to reveal the file ───────────────────
+            bool reveal = EditorUtility.DisplayDialog(
+                "Export Fixed Binary \u2014 Done",
+                $"Exported successfully to:\n{path}",
+                "Reveal in Finder/Explorer",
+                "OK");
+            if (reveal)
+                EditorUtility.RevealInFinder(path);
+        }
+
+        // ── Serialisation (data format unchanged) ─────────────────────────
+        // Writes the fixed-point binary body (header + table segments + pockets)
+        // to <paramref name="writer"/>.  Separated from the UI flow so it can be
+        // called independently and tested without any dialog interaction.
+        private static void WriteFixedBinaryBody(
+            System.IO.BinaryWriter writer, TableAndPocketAuthoring auth)
+        {
+            // Header
+            writer.Write(k_exportMagic);
+            writer.Write(k_exportVersion);
+
+            // Table segments – expand each SegmentData polyline into sub-segments.
+            var segs = auth.Table.Segments;
+            var expandedTableSegs = new System.Collections.Generic.List<(Vector2 a, Vector2 b)>();
+            foreach (var seg in segs)
+            {
+                var pts = BuildPolylinePoints(seg.Start, seg.End, seg.ConnectionPoints);
+                for (int k = 0; k < pts.Count - 1; k++)
+                    expandedTableSegs.Add((pts[k], pts[k + 1]));
+            }
+            writer.Write(expandedTableSegs.Count);
+            foreach (var sub in expandedTableSegs)
+            {
+                writer.Write(Fix64.FromFloat(sub.a.x).RawValue);
+                writer.Write(Fix64.FromFloat(sub.a.y).RawValue);
+                writer.Write(Fix64.FromFloat(sub.b.x).RawValue);
+                writer.Write(Fix64.FromFloat(sub.b.y).RawValue);
+            }
+
+            // Pockets
+            var pockets = auth.Pockets;
+            writer.Write(pockets.Count);
+            foreach (var pocket in pockets)
+            {
+                writer.Write(Fix64.FromFloat(pocket.Center.x).RawValue);
+                writer.Write(Fix64.FromFloat(pocket.Center.y).RawValue);
+                writer.Write(Fix64.FromFloat(pocket.Radius).RawValue);
+                writer.Write(Fix64.FromFloat(pocket.ReboundVelocityThreshold).RawValue);
+
+                // Rim segments – expand each SegmentData polyline into sub-segments.
+                var rims = pocket.RimSegments;
+                var expandedRims = new System.Collections.Generic.List<(Vector2 a, Vector2 b)>();
+                foreach (var rim in rims)
+                {
+                    var pts = BuildPolylinePoints(rim.Start, rim.End, rim.ConnectionPoints);
+                    for (int k = 0; k < pts.Count - 1; k++)
+                        expandedRims.Add((pts[k], pts[k + 1]));
+                }
+                writer.Write(expandedRims.Count);
+                foreach (var sub in expandedRims)
                 {
                     writer.Write(Fix64.FromFloat(sub.a.x).RawValue);
                     writer.Write(Fix64.FromFloat(sub.a.y).RawValue);
                     writer.Write(Fix64.FromFloat(sub.b.x).RawValue);
                     writer.Write(Fix64.FromFloat(sub.b.y).RawValue);
                 }
-
-                // Pockets
-                var pockets = auth.Pockets;
-                writer.Write(pockets.Count);
-                foreach (var pocket in pockets)
-                {
-                    writer.Write(Fix64.FromFloat(pocket.Center.x).RawValue);
-                    writer.Write(Fix64.FromFloat(pocket.Center.y).RawValue);
-                    writer.Write(Fix64.FromFloat(pocket.Radius).RawValue);
-                    writer.Write(Fix64.FromFloat(pocket.ReboundVelocityThreshold).RawValue);
-
-                    // Rim segments – expand each SegmentData polyline into sub-segments.
-                    var rims = pocket.RimSegments;
-                    var expandedRims = new System.Collections.Generic.List<(Vector2 a, Vector2 b)>();
-                    foreach (var rim in rims)
-                    {
-                        var pts = BuildPolylinePoints(rim.Start, rim.End, rim.ConnectionPoints);
-                        for (int k = 0; k < pts.Count - 1; k++)
-                            expandedRims.Add((pts[k], pts[k + 1]));
-                    }
-                    writer.Write(expandedRims.Count);
-                    foreach (var sub in expandedRims)
-                    {
-                        writer.Write(Fix64.FromFloat(sub.a.x).RawValue);
-                        writer.Write(Fix64.FromFloat(sub.a.y).RawValue);
-                        writer.Write(Fix64.FromFloat(sub.b.x).RawValue);
-                        writer.Write(Fix64.FromFloat(sub.b.y).RawValue);
-                    }
-                }
             }
-
-            AssetDatabase.Refresh();
-            Debug.Log($"[BilliardPhysics] Exported fixed-point binary to {path}");
         }
 
         // ── Fixed-Point Binary Import ──────────────────────────────────────

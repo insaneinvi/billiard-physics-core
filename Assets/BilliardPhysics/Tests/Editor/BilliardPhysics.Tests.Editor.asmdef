@@ -3,6 +3,7 @@
     "rootNamespace": "BilliardPhysics.Tests",
     "references": [
         "BilliardPhysics.Runtime",
+        "BilliardPhysics.Editor",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"
     ],
