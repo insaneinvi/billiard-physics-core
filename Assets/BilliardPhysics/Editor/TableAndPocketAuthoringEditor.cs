@@ -262,6 +262,29 @@ namespace BilliardPhysics.Editor
                 }
             }
 
+            // ── Coordinate Transform ──────────────────────────────────────
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("Coordinate Transform", EditorStyles.boldLabel);
+            if (GUILayout.Button("Rotate CCW 90\u00b0 + Translate X=1270"))
+            {
+                bool confirmed = EditorUtility.DisplayDialog(
+                    "Apply Coordinate Transform",
+                    "This will rotate all table/pocket points 90\u00b0 counter-clockwise and translate X by +1270.\n\nThis operation is applied in-place and can be undone.",
+                    "Apply",
+                    "Cancel");
+                if (confirmed)
+                {
+                    var auth = (TableAndPocketAuthoring)target;
+                    Undo.RecordObject(target, "Apply Table/Pocket Transform");
+                    TransformTableConfig(auth.Table);
+                    if (auth.Pockets != null)
+                        foreach (var pocket in auth.Pockets)
+                            TransformPocketConfig(pocket);
+                    EditorUtility.SetDirty(target);
+                    SceneView.RepaintAll();
+                }
+            }
+
             // ── Fixed-Point Binary Export / Import ────────────────────────
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Export / Import", EditorStyles.boldLabel);
@@ -273,6 +296,36 @@ namespace BilliardPhysics.Editor
             {
                 LoadFixedBinary();
             }
+        }
+
+        // ── Coordinate Transform Helpers ──────────────────────────────────
+        // Rotate left (CCW) 90° about origin then translate X by offsetX.
+        // Formula: newX = -oldY + offsetX, newY = oldX
+        private static Vector2 RotateLeft90TranslateX(Vector2 p, float offsetX = 1270f)
+            => new Vector2(-p.y + offsetX, p.x);
+
+        private static void TransformSegmentData(SegmentData seg)
+        {
+            if (seg == null) return;
+            seg.Start = RotateLeft90TranslateX(seg.Start);
+            seg.End   = RotateLeft90TranslateX(seg.End);
+            if (seg.ConnectionPoints != null)
+                for (int i = 0; i < seg.ConnectionPoints.Count; i++)
+                    seg.ConnectionPoints[i] = RotateLeft90TranslateX(seg.ConnectionPoints[i]);
+        }
+
+        private static void TransformTableConfig(TableConfig table)
+        {
+            if (table?.Segments == null) return;
+            foreach (var seg in table.Segments)
+                TransformSegmentData(seg);
+        }
+
+        private static void TransformPocketConfig(PocketConfig pocket)
+        {
+            if (pocket == null) return;
+            pocket.Center = RotateLeft90TranslateX(pocket.Center);
+            TransformSegmentData(pocket.RimSegments);
         }
 
         // ── Fixed-Point Binary Export ──────────────────────────────────────
