@@ -23,6 +23,22 @@ namespace BilliardPhysics.Editor
         private int           _selPrimary = -1; // table segment idx or pocket idx
         private int           _selRim     = -1; // rim segment idx inside pocket
 
+        // ── Optimization-panel selection state ────────────────────────────
+        // Tracks which element was selected in the Table Segments / Pocket Segments
+        // optimization panel. Kept separate from _selKind so the two features
+        // remain independent and neither interferes with the other.
+        private SelectionKind _optKind    = SelectionKind.None;
+        private int           _optPrimary = -1;
+        private int           _optRim     = -1;
+
+        // Highlight style for optimization-panel selection.
+        private static readonly Color s_optHighlightColor = Color.yellow;
+        private const float           k_optHighlightWidth  = 4f;
+
+        // Pre-allocated 2-point buffer used by DrawThickPolyline to avoid
+        // creating a new Vector3[] on every Scene repaint (GC-free).
+        private readonly Vector3[] _thickLinePts = new Vector3[2];
+
         // ── Add-segment mode ──────────────────────────────────────────────
         private enum AddMode { None, TableSegment, PocketRimSegment }
         private AddMode _addMode       = AddMode.None;
@@ -55,6 +71,14 @@ namespace BilliardPhysics.Editor
             _pocketsProp   = serializedObject.FindProperty("Pockets");
             SyncSegmentLengths();
             SyncRimGenArrays();
+        }
+
+        private void OnDisable()
+        {
+            _optKind    = SelectionKind.None;
+            _optPrimary = -1;
+            _optRim     = -1;
+            SceneView.RepaintAll();
         }
 
         // Keep _segmentLengths in sync with the number of table segments.
@@ -153,6 +177,32 @@ namespace BilliardPhysics.Editor
                 "Use the Connection Points list on each segment to add intermediate polyline joints.",
                 MessageType.None);
 
+            // ── Table Segments element selection (optimization panel) ─────
+            // Selecting an element highlights the corresponding line segment in
+            // the Scene view with a bright yellow overlay.  This is independent
+            // of the unified "Table → Elements" list below.
+            if (_tableSegsProp != null)
+            {
+                for (int i = 0; i < _tableSegsProp.arraySize; i++)
+                {
+                    bool isSel = _optKind == SelectionKind.TableSegment && _optPrimary == i;
+                    GUI.color = isSel ? Color.yellow : Color.white;
+                    if (GUILayout.Button("Element " + i + (isSel ? " (selected)" : "")))
+                    {
+                        if (isSel)
+                            ClearOptSelection();
+                        else
+                        {
+                            _optKind    = SelectionKind.TableSegment;
+                            _optPrimary = i;
+                            _optRim     = -1;
+                        }
+                        SceneView.RepaintAll();
+                    }
+                    GUI.color = Color.white;
+                }
+            }
+
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Pockets", EditorStyles.boldLabel);
 
@@ -174,6 +224,9 @@ namespace BilliardPhysics.Editor
                     if (_selKind == SelectionKind.PocketRimSegment &&
                         _selPrimary == removed)
                         ClearSelection();
+                    if (_optKind == SelectionKind.PocketRimSegment &&
+                        _optPrimary == removed)
+                        ClearOptSelection();
                     serializedObject.ApplyModifiedProperties();
                     EditorUtility.SetDirty(target);
                 }
@@ -214,6 +267,42 @@ namespace BilliardPhysics.Editor
                         GenerateRimFromCircle(i);
                     }
                     EditorGUI.EndDisabledGroup();
+                }
+            }
+
+            // ── Pocket Segments element selection (optimization panel) ────
+            // Selecting an element highlights the corresponding rim segment in
+            // the Scene view with a bright yellow overlay.
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("Pocket Segments", EditorStyles.boldLabel);
+            if (_pocketsProp != null)
+            {
+                for (int i = 0; i < _pocketsProp.arraySize; i++)
+                {
+                    SerializedProperty pocket   = _pocketsProp.GetArrayElementAtIndex(i);
+                    SerializedProperty rimsProp = pocket.FindPropertyRelative("RimSegments");
+                    if (rimsProp == null || rimsProp.arraySize == 0) continue;
+
+                    for (int j = 0; j < rimsProp.arraySize; j++)
+                    {
+                        bool rimSel = _optKind == SelectionKind.PocketRimSegment &&
+                                      _optPrimary == i && _optRim == j;
+                        GUI.color = rimSel ? Color.yellow : Color.white;
+                        if (GUILayout.Button("Pocket " + i + ": Element " + j +
+                                             (rimSel ? " (selected)" : "")))
+                        {
+                            if (rimSel)
+                                ClearOptSelection();
+                            else
+                            {
+                                _optKind    = SelectionKind.PocketRimSegment;
+                                _optPrimary = i;
+                                _optRim     = j;
+                            }
+                            SceneView.RepaintAll();
+                        }
+                        GUI.color = Color.white;
+                    }
                 }
             }
 
@@ -701,6 +790,10 @@ namespace BilliardPhysics.Editor
                 }
             }
 
+            // ── Optimization-panel highlight (drawn after all other geometry
+            //    so the bright yellow overlay appears on top) ────────────────
+            DrawOptHighlight();
+
             if (changed)
             {
                 serializedObject.ApplyModifiedProperties();
@@ -784,6 +877,83 @@ namespace BilliardPhysics.Editor
             _selKind    = SelectionKind.None;
             _selPrimary = -1;
             _selRim     = -1;
+        }
+
+        private void ClearOptSelection()
+        {
+            _optKind    = SelectionKind.None;
+            _optPrimary = -1;
+            _optRim     = -1;
+        }
+
+        // Draws the bright-yellow thick-line overlay for whichever element is
+        // currently selected in the optimization panel.  Called at the end of
+        // OnSceneGUI so the highlight renders on top of all other handles.
+        private void DrawOptHighlight()
+        {
+            if (_optKind == SelectionKind.TableSegment &&
+                _optPrimary >= 0 && _tableSegsProp != null &&
+                _optPrimary < _tableSegsProp.arraySize)
+            {
+                SerializedProperty seg     = _tableSegsProp.GetArrayElementAtIndex(_optPrimary);
+                SerializedProperty sp      = seg.FindPropertyRelative("Start");
+                SerializedProperty ep      = seg.FindPropertyRelative("End");
+                SerializedProperty cpsProp = seg.FindPropertyRelative("ConnectionPoints");
+                if (sp != null && ep != null)
+                {
+                    Vector2 sv = sp.vector2Value;
+                    Vector2 ev = ep.vector2Value;
+                    Handles.color = s_optHighlightColor;
+                    DrawThickPolyline(new Vector3(sv.x, sv.y, 0f),
+                                      new Vector3(ev.x, ev.y, 0f),
+                                      cpsProp);
+                }
+            }
+            else if (_optKind == SelectionKind.PocketRimSegment &&
+                     _optPrimary >= 0 && _pocketsProp != null &&
+                     _optPrimary < _pocketsProp.arraySize)
+            {
+                SerializedProperty pocket   = _pocketsProp.GetArrayElementAtIndex(_optPrimary);
+                SerializedProperty rimsProp = pocket.FindPropertyRelative("RimSegments");
+                if (rimsProp != null && _optRim >= 0 && _optRim < rimsProp.arraySize)
+                {
+                    SerializedProperty rim     = rimsProp.GetArrayElementAtIndex(_optRim);
+                    SerializedProperty sp      = rim.FindPropertyRelative("Start");
+                    SerializedProperty ep      = rim.FindPropertyRelative("End");
+                    SerializedProperty cpsProp = rim.FindPropertyRelative("ConnectionPoints");
+                    if (sp != null && ep != null)
+                    {
+                        Vector2 sv = sp.vector2Value;
+                        Vector2 ev = ep.vector2Value;
+                        Handles.color = s_optHighlightColor;
+                        DrawThickPolyline(new Vector3(sv.x, sv.y, 0f),
+                                          new Vector3(ev.x, ev.y, 0f),
+                                          cpsProp);
+                    }
+                }
+            }
+        }
+
+        // Draws a thick anti-aliased polyline (Start → CPs → End) using the
+        // pre-allocated _thickLinePts buffer to avoid per-frame heap allocations.
+        private void DrawThickPolyline(Vector3 start, Vector3 end, SerializedProperty cpsProp)
+        {
+            Vector3 prev = start;
+            if (cpsProp != null)
+            {
+                for (int k = 0; k < cpsProp.arraySize; k++)
+                {
+                    Vector2 cpv  = cpsProp.GetArrayElementAtIndex(k).vector2Value;
+                    Vector3 next = new Vector3(cpv.x, cpv.y, 0f);
+                    _thickLinePts[0] = prev;
+                    _thickLinePts[1] = next;
+                    Handles.DrawAAPolyLine(k_optHighlightWidth, _thickLinePts);
+                    prev = next;
+                }
+            }
+            _thickLinePts[0] = prev;
+            _thickLinePts[1] = end;
+            Handles.DrawAAPolyLine(k_optHighlightWidth, _thickLinePts);
         }
 
         private bool TryDeleteSelected()
