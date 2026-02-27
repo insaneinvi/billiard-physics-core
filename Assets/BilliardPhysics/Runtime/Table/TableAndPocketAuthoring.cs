@@ -28,10 +28,10 @@ namespace BilliardPhysics
     [System.Serializable]
     public class PocketConfig
     {
-        public Vector2           Center;
-        public float             Radius                   = 0.1f;
-        public float             ReboundVelocityThreshold = 1f;
-        public List<SegmentData> RimSegments              = new List<SegmentData>();
+        public Vector2     Center;
+        public float       Radius                   = 0.1f;
+        public float       ReboundVelocityThreshold = 1f;
+        public SegmentData RimSegments              = new SegmentData();
     }
 
     [AddComponentMenu("BilliardPhysics/Table And Pocket Authoring")]
