@@ -472,8 +472,8 @@ namespace BilliardPhysics.Editor
 
             var auth = (TableAndPocketAuthoring)target;
             Undo.RecordObject(target, "Load Fixed Binary");
-            auth.Table   = BuildTableConfig(tableSegments);
-            auth.Pockets = BuildPocketConfigs(pockets);
+            auth.Table   = ImportFixedBinaryHelper.BuildTableConfig(tableSegments);
+            auth.Pockets = ImportFixedBinaryHelper.BuildPocketConfigs(pockets);
             serializedObject.Update();
             EditorUtility.SetDirty(target);
             SyncSegmentLengths();
@@ -482,61 +482,6 @@ namespace BilliardPhysics.Editor
             SceneView.RepaintAll();
             Debug.Log($"[BilliardPhysics] Loaded fixed-point binary from {path}");
         }
-
-        // Converts a Fix64 raw value back to float (32.32 fixed-point).
-        private static float Fix64ToFloat(Fix64 value)
-        {
-            return (float)((double)value.RawValue / (1L << 32));
-        }
-
-        // Converts a list of runtime Segments to a TableConfig (one SegmentData per segment).
-        private static TableConfig BuildTableConfig(List<Segment> segments)
-        {
-            var segsData = new List<SegmentData>(segments.Count);
-            foreach (var seg in segments)
-            {
-                segsData.Add(new SegmentData
-                {
-                    Start = new Vector2(Fix64ToFloat(seg.Start.X), Fix64ToFloat(seg.Start.Y)),
-                    End   = new Vector2(Fix64ToFloat(seg.End.X),   Fix64ToFloat(seg.End.Y)),
-                });
-            }
-            return new TableConfig { Segments = segsData };
-        }
-
-        // Converts a list of runtime Pockets to PocketConfig objects.
-        // All flat rim sub-segments are collapsed back into a single SegmentData with ConnectionPoints,
-        // reversing the polyline expansion performed during export.
-        private static List<PocketConfig> BuildPocketConfigs(List<Pocket> pockets)
-        {
-            var result = new List<PocketConfig>(pockets.Count);
-            foreach (var pocket in pockets)
-            {
-                // Collapse all flat rim sub-segments back into one SegmentData with ConnectionPoints.
-                // Export expands polyline Start→CP[0]→…→CP[n-1]→End into sub-segments; here we reverse it:
-                //   rimSeg.Start      = flat[0].Start
-                //   rimSeg.CP[k-1]    = flat[k].Start  (for k = 1..n-1)
-                //   rimSeg.End        = flat[n-1].End
-                var rimSeg = new SegmentData();
-                var rims   = pocket.RimSegments;
-                if (rims.Count > 0)
-                {
-                    rimSeg.Start = new Vector2(Fix64ToFloat(rims[0].Start.X), Fix64ToFloat(rims[0].Start.Y));
-                    rimSeg.End   = new Vector2(Fix64ToFloat(rims[rims.Count - 1].End.X), Fix64ToFloat(rims[rims.Count - 1].End.Y));
-                    for (int k = 1; k < rims.Count; k++)
-                        rimSeg.ConnectionPoints.Add(new Vector2(Fix64ToFloat(rims[k].Start.X), Fix64ToFloat(rims[k].Start.Y)));
-                }
-                result.Add(new PocketConfig
-                {
-                    Center                   = new Vector2(Fix64ToFloat(pocket.Center.X), Fix64ToFloat(pocket.Center.Y)),
-                    Radius                   = Fix64ToFloat(pocket.Radius),
-                    ReboundVelocityThreshold = Fix64ToFloat(pocket.ReboundVelocityThreshold),
-                    RimSegments              = rimSeg,
-                });
-            }
-            return result;
-        }
-
 
         private void OnSceneGUI()
         {
