@@ -331,7 +331,7 @@ namespace BilliardPhysics.Editor
         // ── Fixed-Point Binary Export ──────────────────────────────────────
         // 0x59485042 is the uint whose little-endian bytes are 0x42,0x50,0x48,0x59 = 'B','P','H','Y'.
         private const uint   k_exportMagic   = 0x59485042u;
-        private const ushort k_exportVersion = 1;
+        private const ushort k_exportVersion = 2;
 
         private void ExportFixedBinary()
         {
@@ -412,10 +412,13 @@ namespace BilliardPhysics.Editor
                 EditorUtility.RevealInFinder(path);
         }
 
-        // ── Serialisation (data format unchanged) ─────────────────────────
+        // ── Serialisation (version 2 format) ──────────────────────────
         // Writes the fixed-point binary body (header + table segments + pockets)
         // to <paramref name="writer"/>.  Separated from the UI flow so it can be
         // called independently and tested without any dialog interaction.
+        //
+        // Version 2 layout per segment:  Start(x,y) + End(x,y) + CPCount + CP[0..n-1]
+        // This preserves ConnectionPoints; the runtime Segment is created 1-to-1.
         private static void WriteFixedBinaryBody(
             System.IO.BinaryWriter writer, TableAndPocketAuthoring auth)
         {
@@ -423,25 +426,19 @@ namespace BilliardPhysics.Editor
             writer.Write(k_exportMagic);
             writer.Write(k_exportVersion);
 
-            // Table segments – expand each SegmentData polyline into sub-segments.
+            // Table segments – one entry per SegmentData, preserving ConnectionPoints.
             var segs = auth.Table.Segments;
-            var expandedTableSegs = new System.Collections.Generic.List<(Vector2 a, Vector2 b)>();
+            writer.Write(segs.Count);
             foreach (var seg in segs)
             {
-                var pts = BuildPolylinePoints(seg.Start, seg.End, seg.ConnectionPoints);
-                for (int k = 0; k < pts.Count - 1; k++)
-                    expandedTableSegs.Add((pts[k], pts[k + 1]));
-            }
-            writer.Write(expandedTableSegs.Count);
-            foreach (var sub in expandedTableSegs)
-            {
-                writer.Write(Fix64.FromFloat(sub.a.x).RawValue);
-                writer.Write(Fix64.FromFloat(sub.a.y).RawValue);
-                writer.Write(Fix64.FromFloat(sub.b.x).RawValue);
-                writer.Write(Fix64.FromFloat(sub.b.y).RawValue);
+                writer.Write(Fix64.FromFloat(seg.Start.x).RawValue);
+                writer.Write(Fix64.FromFloat(seg.Start.y).RawValue);
+                writer.Write(Fix64.FromFloat(seg.End.x).RawValue);
+                writer.Write(Fix64.FromFloat(seg.End.y).RawValue);
+                WriteConnectionPoints(writer, seg.ConnectionPoints);
             }
 
-            // Pockets
+            // Pockets – one rim entry per SegmentData, preserving ConnectionPoints.
             var pockets = auth.Pockets;
             writer.Write(pockets.Count);
             foreach (var pocket in pockets)
@@ -451,21 +448,28 @@ namespace BilliardPhysics.Editor
                 writer.Write(Fix64.FromFloat(pocket.Radius).RawValue);
                 writer.Write(Fix64.FromFloat(pocket.ReboundVelocityThreshold).RawValue);
 
-                // Rim segment – expand the single SegmentData polyline into sub-segments.
+                // Rim: one entry for the single RimSegments SegmentData.
+                writer.Write(1);  // rimSegCount = 1
                 var rim = pocket.RimSegments;
-                var expandedRims = new System.Collections.Generic.List<(Vector2 a, Vector2 b)>();
+                writer.Write(Fix64.FromFloat(rim.Start.x).RawValue);
+                writer.Write(Fix64.FromFloat(rim.Start.y).RawValue);
+                writer.Write(Fix64.FromFloat(rim.End.x).RawValue);
+                writer.Write(Fix64.FromFloat(rim.End.y).RawValue);
+                WriteConnectionPoints(writer, rim.ConnectionPoints);
+            }
+        }
+
+        private static void WriteConnectionPoints(
+            System.IO.BinaryWriter writer, System.Collections.Generic.List<Vector2> cps)
+        {
+            int count = (cps != null) ? cps.Count : 0;
+            writer.Write(count);
+            if (cps != null)
+            {
+                foreach (var cp in cps)
                 {
-                    var pts = BuildPolylinePoints(rim.Start, rim.End, rim.ConnectionPoints);
-                    for (int k = 0; k < pts.Count - 1; k++)
-                        expandedRims.Add((pts[k], pts[k + 1]));
-                }
-                writer.Write(expandedRims.Count);
-                foreach (var sub in expandedRims)
-                {
-                    writer.Write(Fix64.FromFloat(sub.a.x).RawValue);
-                    writer.Write(Fix64.FromFloat(sub.a.y).RawValue);
-                    writer.Write(Fix64.FromFloat(sub.b.x).RawValue);
-                    writer.Write(Fix64.FromFloat(sub.b.y).RawValue);
+                    writer.Write(Fix64.FromFloat(cp.x).RawValue);
+                    writer.Write(Fix64.FromFloat(cp.y).RawValue);
                 }
             }
         }

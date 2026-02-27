@@ -85,7 +85,7 @@ namespace BilliardPhysics
                 {
                     Ball ball = FindBallById(result.BallA);
                     if (ball != null)
-                        ImpulseResolver.ResolveBallCushion(ball, result.Segment);
+                        ImpulseResolver.ResolveBallCushion(ball, result.HitNormal);
                 }
 
                 // Consume advance time plus a small safety margin.
