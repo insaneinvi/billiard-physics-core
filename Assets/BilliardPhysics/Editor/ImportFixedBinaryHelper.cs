@@ -61,28 +61,48 @@ namespace BilliardPhysics.Editor
             int i = 0;
             while (i < segments.Count)
             {
-                var sd = new SegmentData();
-                sd.Start = new Vector2(
-                    Fix64ToFloat(segments[i].Start.X),
-                    Fix64ToFloat(segments[i].Start.Y));
-
-                // Greedily follow connected sub-segments:
-                // a chain continues while segments[i].End == segments[i+1].Start.
-                while (i + 1 < segments.Count &&
-                       segments[i].End == segments[i + 1].Start)
+                // If the runtime Segment already carries ConnectionPoints (v2 format),
+                // map it directly to a SegmentData – no collapsing needed.
+                if (segments[i].ConnectionPoints != null && segments[i].ConnectionPoints.Count > 0)
                 {
-                    sd.ConnectionPoints.Add(new Vector2(
+                    var sd = new SegmentData();
+                    sd.Start = new Vector2(
+                        Fix64ToFloat(segments[i].Start.X),
+                        Fix64ToFloat(segments[i].Start.Y));
+                    sd.End = new Vector2(
                         Fix64ToFloat(segments[i].End.X),
-                        Fix64ToFloat(segments[i].End.Y)));
+                        Fix64ToFloat(segments[i].End.Y));
+                    foreach (FixVec2 cp in segments[i].ConnectionPoints)
+                        sd.ConnectionPoints.Add(new Vector2(Fix64ToFloat(cp.X), Fix64ToFloat(cp.Y)));
+                    segsData.Add(sd);
                     i++;
                 }
+                else
+                {
+                    // v1 flat sub-segment: greedily collapse consecutive connected ones.
+                    var sd = new SegmentData();
+                    sd.Start = new Vector2(
+                        Fix64ToFloat(segments[i].Start.X),
+                        Fix64ToFloat(segments[i].Start.Y));
 
-                sd.End = new Vector2(
-                    Fix64ToFloat(segments[i].End.X),
-                    Fix64ToFloat(segments[i].End.Y));
+                    while (i + 1 < segments.Count &&
+                           segments[i].End == segments[i + 1].Start &&
+                           (segments[i + 1].ConnectionPoints == null ||
+                            segments[i + 1].ConnectionPoints.Count == 0))
+                    {
+                        sd.ConnectionPoints.Add(new Vector2(
+                            Fix64ToFloat(segments[i].End.X),
+                            Fix64ToFloat(segments[i].End.Y)));
+                        i++;
+                    }
 
-                segsData.Add(sd);
-                i++;
+                    sd.End = new Vector2(
+                        Fix64ToFloat(segments[i].End.X),
+                        Fix64ToFloat(segments[i].End.Y));
+
+                    segsData.Add(sd);
+                    i++;
+                }
             }
 
             return new TableConfig { Segments = segsData };
@@ -116,8 +136,22 @@ namespace BilliardPhysics.Editor
             {
                 var rimSeg = new SegmentData();
                 var rims   = pocket.RimSegments;
-                if (rims.Count > 0)
+                if (rims.Count == 1 && rims[0].ConnectionPoints != null &&
+                    rims[0].ConnectionPoints.Count > 0)
                 {
+                    // v2 format: single runtime Segment with embedded ConnectionPoints.
+                    rimSeg.Start = new Vector2(
+                        Fix64ToFloat(rims[0].Start.X),
+                        Fix64ToFloat(rims[0].Start.Y));
+                    rimSeg.End = new Vector2(
+                        Fix64ToFloat(rims[0].End.X),
+                        Fix64ToFloat(rims[0].End.Y));
+                    foreach (FixVec2 cp in rims[0].ConnectionPoints)
+                        rimSeg.ConnectionPoints.Add(new Vector2(Fix64ToFloat(cp.X), Fix64ToFloat(cp.Y)));
+                }
+                else if (rims.Count > 0)
+                {
+                    // v1 format (or single flat sub-segment): collapse all rim Segments.
                     rimSeg.Start = new Vector2(
                         Fix64ToFloat(rims[0].Start.X),
                         Fix64ToFloat(rims[0].Start.Y));

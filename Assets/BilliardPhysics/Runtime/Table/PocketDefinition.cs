@@ -43,17 +43,18 @@ namespace BilliardPhysics
                 {
                     foreach (SegmentData sd in pd.RimSegments)
                     {
-                        // Expand polyline: Start → CP[0] → … → CP[n-1] → End
-                        var pts = new List<Vector2> { sd.Start };
-                        if (sd.ConnectionPoints != null) pts.AddRange(sd.ConnectionPoints);
-                        pts.Add(sd.End);
+                        FixVec2 s = new FixVec2(Fix64.FromFloat(sd.Start.x), Fix64.FromFloat(sd.Start.y));
+                        FixVec2 e = new FixVec2(Fix64.FromFloat(sd.End.x),   Fix64.FromFloat(sd.End.y));
 
-                        for (int k = 0; k < pts.Count - 1; k++)
+                        List<FixVec2> cps = null;
+                        if (sd.ConnectionPoints != null && sd.ConnectionPoints.Count > 0)
                         {
-                            FixVec2 s = new FixVec2(Fix64.FromFloat(pts[k].x),   Fix64.FromFloat(pts[k].y));
-                            FixVec2 e = new FixVec2(Fix64.FromFloat(pts[k+1].x), Fix64.FromFloat(pts[k+1].y));
-                            pocket.RimSegments.Add(new Segment(s, e));
+                            cps = new List<FixVec2>(sd.ConnectionPoints.Count);
+                            foreach (Vector2 cp in sd.ConnectionPoints)
+                                cps.Add(new FixVec2(Fix64.FromFloat(cp.x), Fix64.FromFloat(cp.y)));
                         }
+
+                        pocket.RimSegments.Add(new Segment(s, e, cps));
                     }
                 }
 

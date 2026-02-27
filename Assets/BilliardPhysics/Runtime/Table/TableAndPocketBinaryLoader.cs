@@ -12,8 +12,10 @@ namespace BilliardPhysics
     public static class TableAndPocketBinaryLoader
     {
         /// <summary>'BPHY' magic: 0x59485042 whose little-endian bytes are 0x42,0x50,0x48,0x59 = 'B','P','H','Y'.</summary>
-        private const uint   k_magic   = 0x59485042u;
-        private const ushort k_version = 1;
+        private const uint   k_magic      = 0x59485042u;
+        private const ushort k_version1   = 1;  // legacy flat sub-segments (no ConnectionPoints)
+        private const ushort k_version2   = 2;  // current: Start/End + CPCount + CPs per segment
+        private const ushort k_version    = k_version2;
 
         /// <summary>
         /// Loads table segments and pockets from a binary <see cref="TextAsset"/>.
@@ -99,9 +101,11 @@ namespace BilliardPhysics
                     $"Invalid magic number: expected 0x{k_magic:X8} ('BPHY'), got 0x{magic:X8}.");
 
             ushort version = reader.ReadUInt16();
-            if (version != k_version)
+            if (version != k_version1 && version != k_version2)
                 throw new InvalidDataException(
-                    $"Unsupported file version {version}. This loader only supports version {k_version}.");
+                    $"Unsupported file version {version}. This loader supports versions {k_version1} and {k_version2}.");
+
+            bool hasConnectionPoints = (version >= k_version2);
 
             // ── Table segments ────────────────────────────────────────
             int segCount = ReadInt32Safe(reader, "segment count");
@@ -113,7 +117,12 @@ namespace BilliardPhysics
             {
                 FixVec2 start = ReadFixVec2Safe(reader, $"table segment {i} start");
                 FixVec2 end   = ReadFixVec2Safe(reader, $"table segment {i} end");
-                tableSegments.Add(new Segment(start, end));
+
+                List<FixVec2> cps = null;
+                if (hasConnectionPoints)
+                    cps = ReadConnectionPoints(reader, $"table segment {i}");
+
+                tableSegments.Add(new Segment(start, end, cps));
             }
 
             // ── Pockets ───────────────────────────────────────────────
@@ -142,7 +151,12 @@ namespace BilliardPhysics
                 {
                     FixVec2 rimStart = ReadFixVec2Safe(reader, $"pocket {i} rim segment {j} start");
                     FixVec2 rimEnd   = ReadFixVec2Safe(reader, $"pocket {i} rim segment {j} end");
-                    pocket.RimSegments.Add(new Segment(rimStart, rimEnd));
+
+                    List<FixVec2> rimCps = null;
+                    if (hasConnectionPoints)
+                        rimCps = ReadConnectionPoints(reader, $"pocket {i} rim segment {j}");
+
+                    pocket.RimSegments.Add(new Segment(rimStart, rimEnd, rimCps));
                 }
 
                 pockets.Add(pocket);
@@ -152,6 +166,21 @@ namespace BilliardPhysics
         }
 
         // ── Private helpers ───────────────────────────────────────────────────────
+
+        private static List<FixVec2> ReadConnectionPoints(BinaryReader reader, string context)
+        {
+            int cpCount = ReadInt32Safe(reader, $"{context} ConnectionPoint count");
+            if (cpCount < 0)
+                throw new InvalidDataException(
+                    $"ConnectionPoint count for {context} is negative ({cpCount}).");
+            if (cpCount == 0)
+                return null;
+
+            var cps = new List<FixVec2>(cpCount);
+            for (int k = 0; k < cpCount; k++)
+                cps.Add(ReadFixVec2Safe(reader, $"{context} ConnectionPoint[{k}]"));
+            return cps;
+        }
 
         private static Fix64 ReadFix64Safe(BinaryReader reader, string fieldName)
         {
