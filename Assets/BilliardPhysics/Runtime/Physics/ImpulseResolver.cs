@@ -65,9 +65,13 @@ namespace BilliardPhysics
 
         // ── Ball–cushion collision ────────────────────────────────────────────────
 
-        public static void ResolveBallCushion(Ball ball, Segment seg)
+        /// <summary>
+        /// Resolves a ball-cushion collision using the outward normal of the
+        /// struck sub-segment (or vertex), as determined by CCD detection.
+        /// </summary>
+        public static void ResolveBallCushion(Ball ball, FixVec2 hitNormal)
         {
-            FixVec2 n = seg.Normal;
+            FixVec2 n = hitNormal;
 
             // Vector from ball centre to contact point (on ball surface toward wall).
             FixVec2 r      = -n * ball.Radius;
