@@ -9,8 +9,10 @@ namespace BilliardPhysics
         [System.Serializable]
         public class SegmentData
         {
-            public Vector2 Start;
-            public Vector2 End;
+            public Vector2       Start;
+            public Vector2       End;
+            // Optional intermediate points; the final edge is Start → CP[0] → … → End.
+            public List<Vector2> ConnectionPoints = new List<Vector2>();
         }
 
         [System.Serializable]
@@ -41,9 +43,17 @@ namespace BilliardPhysics
                 {
                     foreach (SegmentData sd in pd.RimSegments)
                     {
-                        FixVec2 start = new FixVec2(Fix64.FromFloat(sd.Start.x), Fix64.FromFloat(sd.Start.y));
-                        FixVec2 end   = new FixVec2(Fix64.FromFloat(sd.End.x),   Fix64.FromFloat(sd.End.y));
-                        pocket.RimSegments.Add(new Segment(start, end));
+                        // Expand polyline: Start → CP[0] → … → CP[n-1] → End
+                        var pts = new List<Vector2> { sd.Start };
+                        if (sd.ConnectionPoints != null) pts.AddRange(sd.ConnectionPoints);
+                        pts.Add(sd.End);
+
+                        for (int k = 0; k < pts.Count - 1; k++)
+                        {
+                            FixVec2 s = new FixVec2(Fix64.FromFloat(pts[k].x),   Fix64.FromFloat(pts[k].y));
+                            FixVec2 e = new FixVec2(Fix64.FromFloat(pts[k+1].x), Fix64.FromFloat(pts[k+1].y));
+                            pocket.RimSegments.Add(new Segment(s, e));
+                        }
                     }
                 }
 

@@ -9,11 +9,20 @@ namespace BilliardPhysics
         [System.Serializable]
         public class SegmentData
         {
-            public Vector2 Start;
-            public Vector2 End;
+            public Vector2       Start;
+            public Vector2       End;
+            // Optional intermediate points; the final edge is Start → CP[0] → CP[1] → … → End.
+            public List<Vector2> ConnectionPoints = new List<Vector2>();
         }
 
-        public List<SegmentData> Segments = new List<SegmentData>();
+        // A billiard table has exactly four border sides.
+        public List<SegmentData> Segments = new List<SegmentData>
+        {
+            new SegmentData(),
+            new SegmentData(),
+            new SegmentData(),
+            new SegmentData(),
+        };
     }
 
     [System.Serializable]
@@ -22,8 +31,10 @@ namespace BilliardPhysics
         [System.Serializable]
         public class SegmentData
         {
-            public Vector2 Start;
-            public Vector2 End;
+            public Vector2       Start;
+            public Vector2       End;
+            // Optional intermediate points; the final edge is Start → CP[0] → CP[1] → … → End.
+            public List<Vector2> ConnectionPoints = new List<Vector2>();
         }
 
         public Vector2           Center;
