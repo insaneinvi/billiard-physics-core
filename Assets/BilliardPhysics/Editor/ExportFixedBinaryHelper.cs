@@ -1,4 +1,3 @@
-#if UNITY_EDITOR
 using System;
 using System.IO;
 
@@ -75,4 +74,3 @@ namespace BilliardPhysics.Editor
         }
     }
 }
-#endif
