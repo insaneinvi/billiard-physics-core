@@ -148,26 +148,10 @@ namespace BilliardPhysics.Editor
 
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Table Segments", EditorStyles.boldLabel);
-
-            if (GUILayout.Button("Add Table Segment"))
-            {
-                _addMode       = AddMode.TableSegment;
-                _addPocketIdx  = -1;
-                _waitingForEnd = false;
-                SceneView.RepaintAll();
-            }
-
-            if (_tableSegsProp != null && _tableSegsProp.arraySize > 0 &&
-                GUILayout.Button("Remove Last Table Segment"))
-            {
-                Undo.RecordObject(target, "Remove Last Table Segment");
-                _tableSegsProp.arraySize--;
-                if (_selKind == SelectionKind.TableSegment &&
-                    _selPrimary >= _tableSegsProp.arraySize)
-                    ClearSelection();
-                serializedObject.ApplyModifiedProperties();
-                EditorUtility.SetDirty(target);
-            }
+            EditorGUILayout.HelpBox(
+                "The table has exactly 4 fixed border segments. " +
+                "Use the Connection Points list on each segment to add intermediate polyline joints.",
+                MessageType.None);
 
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Pockets", EditorStyles.boldLabel);
@@ -249,21 +233,21 @@ namespace BilliardPhysics.Editor
                 }
             }
 
-            // ── Inspector Element Selection ───────────────────────────────
+            // ── Inspector Element Selection (unified Table → Elements list) ──
             EditorGUILayout.Space();
-            EditorGUILayout.LabelField("Selection", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Table → Elements", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox(
-                "Click a segment below to select it – the line turns red in the Scene.",
+                "Click an element to select it – the corresponding line turns red in the Scene.",
                 MessageType.None);
 
-            if (_tableSegsProp != null && _tableSegsProp.arraySize > 0)
+            // Table segments
+            if (_tableSegsProp != null)
             {
-                EditorGUILayout.LabelField("Table Segments:", EditorStyles.miniBoldLabel);
                 for (int i = 0; i < _tableSegsProp.arraySize; i++)
                 {
                     bool isSel = (_selKind == SelectionKind.TableSegment && _selPrimary == i);
                     GUI.color = isSel ? Color.red : Color.white;
-                    if (GUILayout.Button("Segment " + i + (isSel ? " (selected)" : "")))
+                    if (GUILayout.Button("Table: Segment " + i + (isSel ? " (selected)" : "")))
                     {
                         if (isSel)
                             ClearSelection();
@@ -279,22 +263,21 @@ namespace BilliardPhysics.Editor
                 }
             }
 
+            // Pocket rim segments (all pockets, flat list)
             if (_pocketsProp != null)
             {
                 for (int i = 0; i < _pocketsProp.arraySize; i++)
                 {
-                    SerializedProperty pocket  = _pocketsProp.GetArrayElementAtIndex(i);
+                    SerializedProperty pocket   = _pocketsProp.GetArrayElementAtIndex(i);
                     SerializedProperty rimsProp = pocket.FindPropertyRelative("RimSegments");
                     if (rimsProp == null || rimsProp.arraySize == 0) continue;
 
-                    EditorGUILayout.LabelField("Pocket " + i + " Rim Segments:", EditorStyles.miniBoldLabel);
-                    EditorGUI.indentLevel++;
                     for (int j = 0; j < rimsProp.arraySize; j++)
                     {
                         bool rimSel = (_selKind == SelectionKind.PocketRimSegment &&
                                        _selPrimary == i && _selRim == j);
                         GUI.color = rimSel ? Color.red : Color.white;
-                        if (GUILayout.Button("Rim " + j + (rimSel ? " (selected)" : "")))
+                        if (GUILayout.Button("Pocket " + i + ": Rim " + j + (rimSel ? " (selected)" : "")))
                         {
                             if (rimSel)
                                 ClearSelection();
@@ -308,7 +291,6 @@ namespace BilliardPhysics.Editor
                         }
                         GUI.color = Color.white;
                     }
-                    EditorGUI.indentLevel--;
                 }
             }
 
@@ -347,15 +329,22 @@ namespace BilliardPhysics.Editor
                 writer.Write(k_exportMagic);
                 writer.Write(k_exportVersion);
 
-                // Table segments
+                // Table segments – expand each SegmentData polyline into sub-segments.
                 var segs = auth.Table.Segments;
-                writer.Write(segs.Count);
+                var expandedTableSegs = new System.Collections.Generic.List<(Vector2 a, Vector2 b)>();
                 foreach (var seg in segs)
                 {
-                    writer.Write(Fix64.FromFloat(seg.Start.x).RawValue);
-                    writer.Write(Fix64.FromFloat(seg.Start.y).RawValue);
-                    writer.Write(Fix64.FromFloat(seg.End.x).RawValue);
-                    writer.Write(Fix64.FromFloat(seg.End.y).RawValue);
+                    var pts = BuildPolylinePoints(seg.Start, seg.End, seg.ConnectionPoints);
+                    for (int k = 0; k < pts.Count - 1; k++)
+                        expandedTableSegs.Add((pts[k], pts[k + 1]));
+                }
+                writer.Write(expandedTableSegs.Count);
+                foreach (var sub in expandedTableSegs)
+                {
+                    writer.Write(Fix64.FromFloat(sub.a.x).RawValue);
+                    writer.Write(Fix64.FromFloat(sub.a.y).RawValue);
+                    writer.Write(Fix64.FromFloat(sub.b.x).RawValue);
+                    writer.Write(Fix64.FromFloat(sub.b.y).RawValue);
                 }
 
                 // Pockets
@@ -368,14 +357,22 @@ namespace BilliardPhysics.Editor
                     writer.Write(Fix64.FromFloat(pocket.Radius).RawValue);
                     writer.Write(Fix64.FromFloat(pocket.ReboundVelocityThreshold).RawValue);
 
+                    // Rim segments – expand each SegmentData polyline into sub-segments.
                     var rims = pocket.RimSegments;
-                    writer.Write(rims.Count);
+                    var expandedRims = new System.Collections.Generic.List<(Vector2 a, Vector2 b)>();
                     foreach (var rim in rims)
                     {
-                        writer.Write(Fix64.FromFloat(rim.Start.x).RawValue);
-                        writer.Write(Fix64.FromFloat(rim.Start.y).RawValue);
-                        writer.Write(Fix64.FromFloat(rim.End.x).RawValue);
-                        writer.Write(Fix64.FromFloat(rim.End.y).RawValue);
+                        var pts = BuildPolylinePoints(rim.Start, rim.End, rim.ConnectionPoints);
+                        for (int k = 0; k < pts.Count - 1; k++)
+                            expandedRims.Add((pts[k], pts[k + 1]));
+                    }
+                    writer.Write(expandedRims.Count);
+                    foreach (var sub in expandedRims)
+                    {
+                        writer.Write(Fix64.FromFloat(sub.a.x).RawValue);
+                        writer.Write(Fix64.FromFloat(sub.a.y).RawValue);
+                        writer.Write(Fix64.FromFloat(sub.b.x).RawValue);
+                        writer.Write(Fix64.FromFloat(sub.b.y).RawValue);
                     }
                 }
             }
@@ -463,6 +460,7 @@ namespace BilliardPhysics.Editor
                 SerializedProperty seg       = _tableSegsProp.GetArrayElementAtIndex(i);
                 SerializedProperty startProp = seg.FindPropertyRelative("Start");
                 SerializedProperty endProp   = seg.FindPropertyRelative("End");
+                SerializedProperty cpsProp   = seg.FindPropertyRelative("ConnectionPoints");
                 if (startProp == null || endProp == null) continue;
 
                 Vector2 sv = startProp.vector2Value;
@@ -472,11 +470,11 @@ namespace BilliardPhysics.Editor
 
                 bool isSel = (_selKind == SelectionKind.TableSegment && _selPrimary == i);
 
-                // Segment line
+                // Polyline: Start → CP[0] → … → End
                 Handles.color = isSel ? s_tableSelColor : s_tableSegColor;
-                Handles.DrawLine(s3, e3);
+                DrawPolylineHandles(s3, e3, cpsProp);
 
-                // Outward normal arrow from midpoint
+                // Outward normal arrow from the overall Start→End midpoint
                 Vector3 seg3 = e3 - s3;
                 if (seg3.sqrMagnitude > 0.0001f)
                 {
@@ -549,6 +547,28 @@ namespace BilliardPhysics.Editor
                     _selPrimary = i;
                     changed     = true;
                 }
+
+                // Connection point position handles
+                if (cpsProp != null)
+                {
+                    Handles.color = s_handleColor;
+                    for (int k = 0; k < cpsProp.arraySize; k++)
+                    {
+                        SerializedProperty cp  = cpsProp.GetArrayElementAtIndex(k);
+                        Vector2            cpv = cp.vector2Value;
+                        Vector3            cp3 = new Vector3(cpv.x, cpv.y, 0f);
+                        EditorGUI.BeginChangeCheck();
+                        Vector3 newCp = Handles.PositionHandle(cp3, Quaternion.identity);
+                        if (EditorGUI.EndChangeCheck())
+                        {
+                            Undo.RecordObject(target, "Move Table Segment Connection Point");
+                            cp.vector2Value = new Vector2(newCp.x, newCp.y);
+                            _selKind    = SelectionKind.TableSegment;
+                            _selPrimary = i;
+                            changed     = true;
+                        }
+                    }
+                }
             }
 
             // ── Draw pockets ──────────────────────────────────────────────
@@ -604,6 +624,7 @@ namespace BilliardPhysics.Editor
                     SerializedProperty rim      = rimsProp.GetArrayElementAtIndex(j);
                     SerializedProperty rimStart = rim.FindPropertyRelative("Start");
                     SerializedProperty rimEnd   = rim.FindPropertyRelative("End");
+                    SerializedProperty rimCps   = rim.FindPropertyRelative("ConnectionPoints");
                     if (rimStart == null || rimEnd == null) continue;
 
                     Vector2 rsv = rimStart.vector2Value;
@@ -614,9 +635,9 @@ namespace BilliardPhysics.Editor
                     bool rimSel = (_selKind == SelectionKind.PocketRimSegment &&
                                    _selPrimary == i && _selRim == j);
 
-                    // Rim segment line (yellow / orange when selected)
+                    // Polyline: Start → CP[0] → … → End
                     Handles.color = rimSel ? s_pocketRimSelColor : s_pocketRimColor;
-                    Handles.DrawLine(rs, re);
+                    DrawPolylineHandles(rs, re, rimCps);
 
                     // Clickable midpoint for selection
                     Vector3 rimMid  = (rs + re) * 0.5f;
@@ -653,6 +674,29 @@ namespace BilliardPhysics.Editor
                         _selPrimary = i;
                         _selRim     = j;
                         changed     = true;
+                    }
+
+                    // Connection point position handles
+                    if (rimCps != null)
+                    {
+                        Handles.color = s_handleColor;
+                        for (int k = 0; k < rimCps.arraySize; k++)
+                        {
+                            SerializedProperty cp  = rimCps.GetArrayElementAtIndex(k);
+                            Vector2            cpv = cp.vector2Value;
+                            Vector3            cp3 = new Vector3(cpv.x, cpv.y, 0f);
+                            EditorGUI.BeginChangeCheck();
+                            Vector3 newCp = Handles.PositionHandle(cp3, Quaternion.identity);
+                            if (EditorGUI.EndChangeCheck())
+                            {
+                                Undo.RecordObject(target, "Move Rim Segment Connection Point");
+                                cp.vector2Value = new Vector2(newCp.x, newCp.y);
+                                _selKind    = SelectionKind.PocketRimSegment;
+                                _selPrimary = i;
+                                _selRim     = j;
+                                changed     = true;
+                            }
+                        }
                     }
                 }
             }
@@ -823,6 +867,35 @@ namespace BilliardPhysics.Editor
                 return new Vector2(world.x, world.y);
             }
             return new Vector2(ray.origin.x, ray.origin.y);
+        }
+
+        // Draw a polyline Start → CP[0] → … → CP[n-1] → End using the current Handles.color.
+        private static void DrawPolylineHandles(Vector3 start, Vector3 end,
+                                                SerializedProperty cpsProp)
+        {
+            Vector3 prev = start;
+            if (cpsProp != null)
+            {
+                for (int k = 0; k < cpsProp.arraySize; k++)
+                {
+                    Vector2 cpv  = cpsProp.GetArrayElementAtIndex(k).vector2Value;
+                    Vector3 next = new Vector3(cpv.x, cpv.y, 0f);
+                    Handles.DrawLine(prev, next);
+                    prev = next;
+                }
+            }
+            Handles.DrawLine(prev, end);
+        }
+
+        // Build the ordered point list [Start, CP[0], …, CP[n-1], End] for export/building.
+        private static System.Collections.Generic.List<Vector2> BuildPolylinePoints(
+            Vector2 start, Vector2 end,
+            System.Collections.Generic.List<Vector2> connectionPoints)
+        {
+            var pts = new System.Collections.Generic.List<Vector2> { start };
+            if (connectionPoints != null) pts.AddRange(connectionPoints);
+            pts.Add(end);
+            return pts;
         }
     }
 }
