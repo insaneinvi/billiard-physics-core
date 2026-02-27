@@ -297,5 +297,52 @@ namespace BilliardPhysics.Tests
             Assert.AreEqual(segs1.Count,    segs2.Count,    "Segment counts should match between overloads.");
             Assert.AreEqual(pockets1.Count, pockets2.Count, "Pocket counts should match between overloads.");
         }
+
+        // ── Regression: polyline-expanded rim sub-segments ────────────────
+        // Note: This test uses the runtime Pocket class (Pocket.RimSegments = List<Segment>),
+        // NOT PocketConfig.RimSegments (which is now a single SegmentData after this PR).
+        // Export expands one SegmentData (Start + N ConnectionPoints + End) into N+1 flat
+        // sub-segments.  This test verifies that the loader correctly reads all sub-segments
+        // so that the editor can later collapse them back into one SegmentData with N CPs.
+
+        [Test]
+        public void Load_PocketWithMultipleConnectedRimSubSegments_AllSubSegmentsPresent()
+        {
+            // Simulates a SegmentData with Start=A, CP[0]=B, CP[1]=C, End=D
+            // expanded into 3 sub-segments: A→B, B→C, C→D.
+            Fix64 ax = Fix64.FromFloat(0f),  ay = Fix64.FromFloat(0f);
+            Fix64 bx = Fix64.FromFloat(1f),  by = Fix64.FromFloat(0f);
+            Fix64 cx = Fix64.FromFloat(2f),  cy = Fix64.FromFloat(0f);
+            Fix64 dx = Fix64.FromFloat(3f),  dy = Fix64.FromFloat(0f);
+
+            var rims = new List<(Fix64, Fix64, Fix64, Fix64)>
+            {
+                (ax, ay, bx, by),  // sub-segment A→B
+                (bx, by, cx, cy),  // sub-segment B→C
+                (cx, cy, dx, dy),  // sub-segment C→D
+            };
+            var pocketList = new List<(Fix64, Fix64, Fix64, Fix64, List<(Fix64, Fix64, Fix64, Fix64)>)>
+            {
+                (Fix64.Zero, Fix64.Zero, Fix64.FromFloat(0.1f), Fix64.One, rims)
+            };
+            byte[] bytes = BuildValidBinary(new List<(Fix64, Fix64, Fix64, Fix64)>(), pocketList);
+
+            TableAndPocketBinaryLoader.Load(bytes, out _, out var pockets);
+
+            // pockets[0].RimSegments is List<Segment> (runtime Pocket, unchanged by this PR).
+            Assert.AreEqual(1, pockets.Count, "One pocket expected.");
+            Assert.AreEqual(3, pockets[0].RimSegments.Count,
+                "All 3 flat rim sub-segments must be loaded (Start→CP0, CP0→CP1, CP1→End).");
+
+            // Verify connectivity: each sub-segment's End equals the next one's Start.
+            Assert.AreEqual(pockets[0].RimSegments[0].End, pockets[0].RimSegments[1].Start,
+                "Sub-segment 0 End must equal sub-segment 1 Start (connected polyline).");
+            Assert.AreEqual(pockets[0].RimSegments[1].End, pockets[0].RimSegments[2].Start,
+                "Sub-segment 1 End must equal sub-segment 2 Start (connected polyline).");
+
+            // Verify overall Start and End are preserved.
+            Assert.AreEqual(ax, pockets[0].RimSegments[0].Start.X, "First sub-segment Start.X must be A.");
+            Assert.AreEqual(dx, pockets[0].RimSegments[2].End.X,   "Last sub-segment End.X must be D.");
+        }
     }
 }
