@@ -34,6 +34,11 @@ namespace BilliardPhysics.Editor
         private bool    _lengthConstraintEnabled = false;
         private float[] _segmentLengths          = System.Array.Empty<float>();
 
+        // ── Rim Generation Settings (per-pocket, editor-only) ─────────────
+        private int[]   _rimGenSegCount      = System.Array.Empty<int>();
+        private float[] _rimGenStartAngle    = System.Array.Empty<float>();
+        private bool[]  _rimGenClearExisting = System.Array.Empty<bool>();
+
         // Threshold for treating a segment as degenerate (squared length).
         private const float k_minSegLenSq = 1e-6f;
         // Fallback direction used when a segment is degenerate.
@@ -49,6 +54,7 @@ namespace BilliardPhysics.Editor
             _tableSegsProp = tableProp?.FindPropertyRelative("Segments");
             _pocketsProp   = serializedObject.FindProperty("Pockets");
             SyncSegmentLengths();
+            SyncRimGenArrays();
         }
 
         // Keep _segmentLengths in sync with the number of table segments.
@@ -199,6 +205,31 @@ namespace BilliardPhysics.Editor
                         _waitingForEnd = false;
                         SceneView.RepaintAll();
                     }
+                }
+
+                EditorGUILayout.Space();
+                EditorGUILayout.LabelField("Generate Rim From Circle:", EditorStyles.boldLabel);
+                SyncRimGenArrays();
+                for (int i = 0; i < _pocketsProp.arraySize; i++)
+                {
+                    EditorGUILayout.LabelField("Pocket " + i, EditorStyles.miniBoldLabel);
+                    _rimGenSegCount[i]      = EditorGUILayout.IntField("  Segment Count", _rimGenSegCount[i]);
+                    _rimGenStartAngle[i]    = EditorGUILayout.FloatField("  Start Angle (deg)", _rimGenStartAngle[i]);
+                    _rimGenClearExisting[i] = EditorGUILayout.Toggle("  Clear Existing", _rimGenClearExisting[i]);
+
+                    bool invalid = _rimGenSegCount[i] < 3;
+                    if (invalid)
+                    {
+                        EditorGUILayout.HelpBox(
+                            "Segment count must be >= 3.", MessageType.Warning);
+                    }
+
+                    EditorGUI.BeginDisabledGroup(invalid);
+                    if (GUILayout.Button("Pocket " + i + ": Generate Rim From Circle"))
+                    {
+                        GenerateRimFromCircle(i);
+                    }
+                    EditorGUI.EndDisabledGroup();
                 }
             }
 
@@ -500,6 +531,75 @@ namespace BilliardPhysics.Editor
         }
 
         // ── Helpers ───────────────────────────────────────────────────────
+
+        // Keep _rimGenSegCount/Angle/Clear arrays in sync with the pocket count.
+        private void SyncRimGenArrays()
+        {
+            if (_pocketsProp == null) return;
+            int count = _pocketsProp.arraySize;
+            if (_rimGenSegCount.Length == count) return;
+
+            int[]   newCount = new int[count];
+            float[] newAngle = new float[count];
+            bool[]  newClear = new bool[count];
+            for (int i = 0; i < count; i++)
+            {
+                newCount[i] = i < _rimGenSegCount.Length      ? _rimGenSegCount[i]      : 8;
+                newAngle[i] = i < _rimGenStartAngle.Length    ? _rimGenStartAngle[i]    : 0f;
+                newClear[i] = i < _rimGenClearExisting.Length ? _rimGenClearExisting[i] : true;
+            }
+            _rimGenSegCount      = newCount;
+            _rimGenStartAngle    = newAngle;
+            _rimGenClearExisting = newClear;
+        }
+
+        private void GenerateRimFromCircle(int pocketIdx)
+        {
+            if (_pocketsProp == null || pocketIdx < 0 || pocketIdx >= _pocketsProp.arraySize)
+                return;
+
+            SerializedProperty pocket     = _pocketsProp.GetArrayElementAtIndex(pocketIdx);
+            SerializedProperty centerProp = pocket.FindPropertyRelative("Center");
+            SerializedProperty radiusProp = pocket.FindPropertyRelative("Radius");
+            SerializedProperty rimsProp   = pocket.FindPropertyRelative("RimSegments");
+            if (centerProp == null || radiusProp == null || rimsProp == null) return;
+
+            Vector2 center   = centerProp.vector2Value;
+            float   radius   = Mathf.Max(0.01f, radiusProp.floatValue);
+            int     A        = _rimGenSegCount[pocketIdx];
+            float   startRad = _rimGenStartAngle[pocketIdx] * Mathf.Deg2Rad;
+            bool    clear    = _rimGenClearExisting[pocketIdx];
+
+            Undo.RecordObject(target, "Generate Pocket Rim Segments");
+
+            if (clear)
+                rimsProp.arraySize = 0;
+
+            int baseIdx = rimsProp.arraySize;
+            rimsProp.arraySize += A;
+
+            for (int k = 0; k < A; k++)
+            {
+                float   thetaK  = startRad + k       * 2f * Mathf.PI / A;
+                float   thetaK1 = startRad + (k + 1) * 2f * Mathf.PI / A;
+                Vector2 pK  = center + new Vector2(Mathf.Cos(thetaK),  Mathf.Sin(thetaK))  * radius;
+                Vector2 pK1 = center + new Vector2(Mathf.Cos(thetaK1), Mathf.Sin(thetaK1)) * radius;
+
+                SerializedProperty seg    = rimsProp.GetArrayElementAtIndex(baseIdx + k);
+                SerializedProperty startP = seg.FindPropertyRelative("Start");
+                SerializedProperty endP   = seg.FindPropertyRelative("End");
+                startP.vector2Value = pK;
+                endP.vector2Value   = pK1;
+            }
+
+            serializedObject.ApplyModifiedProperties();
+            EditorUtility.SetDirty(target);
+
+            _selKind    = SelectionKind.PocketRimSegment;
+            _selPrimary = pocketIdx;
+            _selRim     = baseIdx;
+            SceneView.RepaintAll();
+        }
 
         private void ClearSelection()
         {
