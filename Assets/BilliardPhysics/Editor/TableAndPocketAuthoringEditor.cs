@@ -9,11 +9,11 @@ namespace BilliardPhysics.Editor
     {
         // ── Colors ────────────────────────────────────────────────────────
         private static readonly Color s_tableSegColor    = Color.green;
-        private static readonly Color s_tableSelColor    = Color.cyan;
+        private static readonly Color s_tableSelColor    = Color.red;
         private static readonly Color s_normalColor      = new Color(0f, 0.4f, 1f, 0.8f);
         private static readonly Color s_pocketRadColor   = Color.cyan;
         private static readonly Color s_pocketRimColor   = Color.yellow;
-        private static readonly Color s_pocketRimSelColor = new Color(1f, 0.5f, 0f, 1f);
+        private static readonly Color s_pocketRimSelColor = Color.red;
         private static readonly Color s_handleColor      = Color.white;
         private static readonly Color s_addPreviewColor  = new Color(1f, 1f, 0f, 0.6f);
 
@@ -246,6 +246,69 @@ namespace BilliardPhysics.Editor
                     _addMode       = AddMode.None;
                     _waitingForEnd = false;
                     SceneView.RepaintAll();
+                }
+            }
+
+            // ── Inspector Element Selection ───────────────────────────────
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("Selection", EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox(
+                "Click a segment below to select it – the line turns red in the Scene.",
+                MessageType.None);
+
+            if (_tableSegsProp != null && _tableSegsProp.arraySize > 0)
+            {
+                EditorGUILayout.LabelField("Table Segments:", EditorStyles.miniBoldLabel);
+                for (int i = 0; i < _tableSegsProp.arraySize; i++)
+                {
+                    bool isSel = (_selKind == SelectionKind.TableSegment && _selPrimary == i);
+                    GUI.color = isSel ? Color.red : Color.white;
+                    if (GUILayout.Button("Segment " + i + (isSel ? " (selected)" : "")))
+                    {
+                        if (isSel)
+                            ClearSelection();
+                        else
+                        {
+                            _selKind    = SelectionKind.TableSegment;
+                            _selPrimary = i;
+                            _selRim     = -1;
+                        }
+                        SceneView.RepaintAll();
+                    }
+                    GUI.color = Color.white;
+                }
+            }
+
+            if (_pocketsProp != null)
+            {
+                for (int i = 0; i < _pocketsProp.arraySize; i++)
+                {
+                    SerializedProperty pocket  = _pocketsProp.GetArrayElementAtIndex(i);
+                    SerializedProperty rimsProp = pocket.FindPropertyRelative("RimSegments");
+                    if (rimsProp == null || rimsProp.arraySize == 0) continue;
+
+                    EditorGUILayout.LabelField("Pocket " + i + " Rim Segments:", EditorStyles.miniBoldLabel);
+                    EditorGUI.indentLevel++;
+                    for (int j = 0; j < rimsProp.arraySize; j++)
+                    {
+                        bool rimSel = (_selKind == SelectionKind.PocketRimSegment &&
+                                       _selPrimary == i && _selRim == j);
+                        GUI.color = rimSel ? Color.red : Color.white;
+                        if (GUILayout.Button("Rim " + j + (rimSel ? " (selected)" : "")))
+                        {
+                            if (rimSel)
+                                ClearSelection();
+                            else
+                            {
+                                _selKind    = SelectionKind.PocketRimSegment;
+                                _selPrimary = i;
+                                _selRim     = j;
+                            }
+                            SceneView.RepaintAll();
+                        }
+                        GUI.color = Color.white;
+                    }
+                    EditorGUI.indentLevel--;
                 }
             }
 
