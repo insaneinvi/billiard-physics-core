@@ -248,6 +248,77 @@ namespace BilliardPhysics.Editor
                     SceneView.RepaintAll();
                 }
             }
+
+            // ── Fixed-Point Binary Export ─────────────────────────────────
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("Export", EditorStyles.boldLabel);
+            if (GUILayout.Button("Export Fixed Binary (.bytes)"))
+            {
+                ExportFixedBinary();
+            }
+        }
+
+        // ── Fixed-Point Binary Export ──────────────────────────────────────
+        // 0x59485042 is the uint whose little-endian bytes are 0x42,0x50,0x48,0x59 = 'B','P','H','Y'.
+        private const uint   k_exportMagic   = 0x59485042u;
+        private const ushort k_exportVersion = 1;
+
+        private void ExportFixedBinary()
+        {
+            var auth = (TableAndPocketAuthoring)target;
+
+            const string dir = "Assets/Data";
+            if (!System.IO.Directory.Exists(dir))
+                System.IO.Directory.CreateDirectory(dir);
+
+            // Sanitize the GameObject name so it is safe to use as a file name.
+            string safeName = string.Concat(
+                auth.gameObject.name.Split(System.IO.Path.GetInvalidFileNameChars()));
+            if (string.IsNullOrEmpty(safeName)) safeName = "table";
+            string path = System.IO.Path.Combine(dir, safeName + ".bytes");
+
+            using (var writer = new System.IO.BinaryWriter(
+                       System.IO.File.Open(path, System.IO.FileMode.Create)))
+            {
+                // Header
+                writer.Write(k_exportMagic);
+                writer.Write(k_exportVersion);
+
+                // Table segments
+                var segs = auth.Table.Segments;
+                writer.Write(segs.Count);
+                foreach (var seg in segs)
+                {
+                    writer.Write(Fix64.FromFloat(seg.Start.x).RawValue);
+                    writer.Write(Fix64.FromFloat(seg.Start.y).RawValue);
+                    writer.Write(Fix64.FromFloat(seg.End.x).RawValue);
+                    writer.Write(Fix64.FromFloat(seg.End.y).RawValue);
+                }
+
+                // Pockets
+                var pockets = auth.Pockets;
+                writer.Write(pockets.Count);
+                foreach (var pocket in pockets)
+                {
+                    writer.Write(Fix64.FromFloat(pocket.Center.x).RawValue);
+                    writer.Write(Fix64.FromFloat(pocket.Center.y).RawValue);
+                    writer.Write(Fix64.FromFloat(pocket.Radius).RawValue);
+                    writer.Write(Fix64.FromFloat(pocket.ReboundVelocityThreshold).RawValue);
+
+                    var rims = pocket.RimSegments;
+                    writer.Write(rims.Count);
+                    foreach (var rim in rims)
+                    {
+                        writer.Write(Fix64.FromFloat(rim.Start.x).RawValue);
+                        writer.Write(Fix64.FromFloat(rim.Start.y).RawValue);
+                        writer.Write(Fix64.FromFloat(rim.End.x).RawValue);
+                        writer.Write(Fix64.FromFloat(rim.End.y).RawValue);
+                    }
+                }
+            }
+
+            AssetDatabase.Refresh();
+            Debug.Log($"[BilliardPhysics] Exported fixed-point binary to {path}");
         }
 
         // ── Scene GUI ─────────────────────────────────────────────────────
