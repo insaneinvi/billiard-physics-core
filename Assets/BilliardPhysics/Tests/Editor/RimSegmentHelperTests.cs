@@ -13,10 +13,10 @@ namespace BilliardPhysics.Tests
     {
         // ── Helpers ───────────────────────────────────────────────────────
 
-        private static PocketConfig.SegmentData MakeSeg(
+        private static SegmentData MakeSeg(
             Vector2 start, Vector2 end, params Vector2[] cps)
         {
-            return new PocketConfig.SegmentData
+            return new SegmentData
             {
                 Start            = start,
                 End              = end,

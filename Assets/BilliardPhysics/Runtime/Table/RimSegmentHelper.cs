@@ -5,7 +5,7 @@ namespace BilliardPhysics
 {
     /// <summary>
     /// Pure-data helpers for maintaining Start / ConnectionPoints / End
-    /// ordering on a <see cref="PocketConfig.SegmentData"/>.
+    /// ordering on a <see cref="SegmentData"/>.
     ///
     /// Invariant: the ordered polyline is  Start → CP[0] → CP[1] → … → CP[n-1] → End.
     ///
@@ -26,7 +26,7 @@ namespace BilliardPhysics
         /// <c>true</c> on success; <c>false</c> if ConnectionPoints is empty
         /// (operation is blocked to prevent segment degeneration).
         /// </returns>
-        public static bool TryPromoteLastCPToEnd(PocketConfig.SegmentData seg)
+        public static bool TryPromoteLastCPToEnd(SegmentData seg)
         {
             if (seg == null) return false;
             if (seg.ConnectionPoints == null || seg.ConnectionPoints.Count == 0)
@@ -47,7 +47,7 @@ namespace BilliardPhysics
         /// <c>true</c> on success; <c>false</c> if ConnectionPoints is empty
         /// (operation is blocked to prevent segment degeneration).
         /// </returns>
-        public static bool TryPromoteFirstCPToStart(PocketConfig.SegmentData seg)
+        public static bool TryPromoteFirstCPToStart(SegmentData seg)
         {
             if (seg == null) return false;
             if (seg.ConnectionPoints == null || seg.ConnectionPoints.Count == 0)
