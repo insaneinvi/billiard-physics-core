@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using UnityEngine;
 
 namespace BilliardPhysics
 {
@@ -141,6 +142,122 @@ namespace BilliardPhysics
             foreach (Ball ball in _balls)
                 if (ball.Id == id) return ball;
             return null;
+        }
+
+        // ── Debug draw ────────────────────────────────────────────────────────────
+
+        private bool     _debugEnabled;
+        private Material _debugLineMat;
+
+        private static readonly Color s_debugSegmentColor = Color.green;
+        private static readonly Color s_debugPocketColor  = Color.cyan;
+        private static readonly Color s_debugRimColor     = Color.yellow;
+
+        /// <summary>
+        /// Enables or disables runtime debug drawing in the Game view.
+        /// When enabled, table boundary segments and pocket geometry are visualised
+        /// each frame via <see cref="Camera.onPostRender"/>.
+        /// Call <c>SetDebug(false)</c> when the world is no longer in use to unsubscribe
+        /// from the render callback.
+        /// </summary>
+        public void SetDebug(bool enable)
+        {
+            if (enable == _debugEnabled) return;
+            _debugEnabled = enable;
+            if (enable)
+            {
+                Camera.onPostRender += OnDebugDraw;
+            }
+            else
+            {
+                Camera.onPostRender -= OnDebugDraw;
+                if (_debugLineMat != null)
+                {
+                    Object.Destroy(_debugLineMat);
+                    _debugLineMat = null;
+                }
+            }
+        }
+
+        // Lazily-created unlit GL material used for debug lines.
+        private Material DebugLineMaterial
+        {
+            get
+            {
+                if (_debugLineMat == null)
+                {
+                    Shader shader = Shader.Find("Hidden/Internal-Colored");
+                    if (shader == null)
+                    {
+                        Debug.LogWarning("[BilliardPhysics] Debug line shader 'Hidden/Internal-Colored' not found.");
+                        return null;
+                    }
+                    _debugLineMat  = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
+                    _debugLineMat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                    _debugLineMat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                    _debugLineMat.SetInt("_Cull",     (int)UnityEngine.Rendering.CullMode.Off);
+                    _debugLineMat.SetInt("_ZWrite",   0);
+                }
+                return _debugLineMat;
+            }
+        }
+
+        private void OnDebugDraw(Camera cam)
+        {
+            Material mat = DebugLineMaterial;
+            if (mat == null) return;
+
+            mat.SetPass(0);
+            GL.PushMatrix();
+            GL.Begin(GL.LINES);
+
+            // Draw table boundary segments.
+            GL.Color(s_debugSegmentColor);
+            foreach (Segment seg in _tableSegments)
+                DrawSegmentGL(seg);
+
+            // Draw pocket circles and rim segments.
+            foreach (Pocket pocket in _pockets)
+            {
+                GL.Color(s_debugPocketColor);
+                DrawCircleGL(pocket.Center, pocket.Radius);
+
+                if (pocket.RimSegment != null)
+                {
+                    GL.Color(s_debugRimColor);
+                    DrawSegmentGL(pocket.RimSegment);
+                }
+            }
+
+            GL.End();
+            GL.PopMatrix();
+        }
+
+        // Draws the polyline Start → CP[0] → … → CP[n-1] → End using GL.LINES.
+        private static void DrawSegmentGL(Segment seg)
+        {
+            IReadOnlyList<FixVec2> pts = seg.Points;
+            for (int i = 0; i < pts.Count - 1; i++)
+            {
+                GL.Vertex3(pts[i].X.ToFloat(),     pts[i].Y.ToFloat(),     0f);
+                GL.Vertex3(pts[i + 1].X.ToFloat(), pts[i + 1].Y.ToFloat(), 0f);
+            }
+        }
+
+        // Approximates a circle with a line-segment polygon using GL.LINES.
+        private static void DrawCircleGL(FixVec2 center, Fix64 radius, int segments = 32)
+        {
+            float cx   = center.X.ToFloat();
+            float cy   = center.Y.ToFloat();
+            float r    = radius.ToFloat();
+            float step = 2f * Mathf.PI / segments;
+            for (int i = 0; i < segments; i++)
+            {
+                float a0 = step * i;
+                float a1 = step * (i + 1);
+                GL.Vertex3(cx + Mathf.Cos(a0) * r, cy + Mathf.Sin(a0) * r, 0f);
+                GL.Vertex3(cx + Mathf.Cos(a1) * r, cy + Mathf.Sin(a1) * r, 0f);
+            }
         }
     }
 }
