@@ -102,7 +102,7 @@ public class BilliardTest : MonoBehaviour
             var ballShadowObj = ballShadowDict[ball.Id];
 
             ballObj.transform.position = new Vector3(ball.Position.X.ToFloat(), ball.Position.Y.ToFloat(), -BallRackHelper.HalfBallDiameter);
-            ballObj.transform.rotation = ball.Rotation;
+            ballObj.transform.rotation = PhysicsToRenderRotation(ball.Rotation);
             ballShadowObj.transform.position = new Vector3( ballObj.transform.position.x + 15,   ballObj.transform.position.y+5, -0.1f );
         }
 
@@ -125,5 +125,18 @@ public class BilliardTest : MonoBehaviour
         FixVec2 direction = new FixVec2(Fix64.One, Fix64.Zero).Normalized;
         Fix64 strength = Fix64.From(160000);
         _physicsWorld.ApplyCueStrike(cueBall, direction, strength, Fix64.Zero, Fix64.Zero);
+    }
+
+    /// <summary>
+    /// Converts a rotation from the physics coordinate system (Z-down: +Z toward table)
+    /// to Unity's rendering coordinate system by applying a change of basis M = diag(1,1,-1).
+    ///
+    /// The formula is R_render = M * R_physics * M, which in quaternion form negates the
+    /// X and Y components while leaving W and Z unchanged:
+    ///   (w, qx, qy, qz) → (w, -qx, -qy, qz)
+    /// </summary>
+    private static Quaternion PhysicsToRenderRotation(Quaternion q)
+    {
+        return new Quaternion(-q.x, -q.y, q.z, q.w);
     }
 }

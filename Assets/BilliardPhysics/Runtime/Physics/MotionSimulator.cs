@@ -4,8 +4,10 @@ namespace BilliardPhysics
 {
     /// <summary>
     /// Advances ball linear and angular motion under friction, without resolving collisions.
-    /// Coordinate convention: Z-down (table normal n = (0,0,-1)).
-    /// Ball center-to-contact-point vector: r = (0, 0, +Radius) (points in +Z).
+    /// Coordinate convention: Z-down (+Z points toward the table; table normal n = (0,0,-1)).
+    /// Ball center-to-contact-point vector: r = (0, 0, +Radius) (points in +Z, i.e. downward).
+    /// Ball.Rotation is integrated in this physics frame; apply the change-of-basis
+    /// R_render = M·R_physics·M (M = diag(1,1,-1)) before assigning to Unity's transform.rotation.
     /// </summary>
     public static class MotionSimulator
     {
