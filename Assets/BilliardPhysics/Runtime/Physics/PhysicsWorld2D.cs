@@ -10,6 +10,10 @@ namespace BilliardPhysics
         private readonly List<Segment> _tableSegments  = new List<Segment>();
         private readonly List<Pocket>  _pockets        = new List<Pocket>();
 
+        // Spatial grid for segment broadphase; rebuilt when segments change.
+        private SegmentGrid _segmentGrid;
+        private bool        _segmentGridDirty = true;
+
         private Fix64 _fixedDt   = Fix64.One / Fix64.From(60);
         private int   _nextBallId;
 
@@ -25,6 +29,21 @@ namespace BilliardPhysics
         // enough that it does not visibly affect the simulation at 60 Hz.
         private static readonly Fix64 CollisionEpsilon = Fix64.From(1) / Fix64.From(100000);
 
+        // ── Performance stats (updated each Step call) ────────────────────────────
+
+        /// <summary>
+        /// Number of ball–segment narrow-phase tests performed during the last
+        /// <see cref="Step"/> call.  Compare with <c>Balls.Count × TableSegments.Count</c>
+        /// to gauge how much the spatial grid reduces unnecessary work.
+        /// </summary>
+        public int LastStepNarrowPhaseSegmentCalls { get; private set; }
+
+        /// <summary>
+        /// Wall-clock milliseconds spent inside <see cref="CCDSystem.FindEarliestCollision"/>
+        /// (all substeps combined) during the last <see cref="Step"/> call.
+        /// </summary>
+        public float LastStepFindCollisionMs { get; private set; }
+
         // ── Public read-only views ────────────────────────────────────────────────
         public IReadOnlyList<Ball>    Balls         => _balls;
         public IReadOnlyList<Segment> TableSegments => _tableSegments;
@@ -38,26 +57,41 @@ namespace BilliardPhysics
             _balls.Add(ball);
         }
 
-        public void AddSegment(Segment seg)   => _tableSegments.Add(seg);
+        public void AddSegment(Segment seg)
+        {
+            _tableSegments.Add(seg);
+            _segmentGridDirty = true;
+        }
         public void AddPocket(Pocket pocket)  => _pockets.Add(pocket);
 
         public void SetTableSegments(IEnumerable<Segment> segs)
         {
             _tableSegments.Clear();
             _tableSegments.AddRange(segs);
+            _segmentGridDirty = true;
         }
 
         // ── Simulation step ───────────────────────────────────────────────────────
 
         public void Step()
         {
+            // (Re)build the segment grid if segments have changed since last step.
+            if (_segmentGridDirty)
+            {
+                _segmentGrid      = _tableSegments.Count > 0 ? new SegmentGrid(_tableSegments) : null;
+                _segmentGridDirty = false;
+            }
+
+            CCDSystem.ResetStats();
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
             Fix64 remainingTime = _fixedDt;
             int   subSteps      = 0;
 
             while (remainingTime > Fix64.Zero && subSteps < MaxSubSteps)
             {
                 CCDSystem.TOIResult result = CCDSystem.FindEarliestCollision(
-                    _balls, _tableSegments, _pockets, remainingTime);
+                    _balls, _tableSegments, _pockets, remainingTime, _segmentGrid);
 
                 if (!result.Hit)
                 {
@@ -97,6 +131,10 @@ namespace BilliardPhysics
                 CheckPocketCaptures();
                 subSteps++;
             }
+
+            stopwatch.Stop();
+            LastStepNarrowPhaseSegmentCalls = CCDSystem.NarrowPhaseSegmentCalls;
+            LastStepFindCollisionMs         = (float)stopwatch.Elapsed.TotalMilliseconds;
         }
 
         // ── Cue strike ────────────────────────────────────────────────────────────
