@@ -303,5 +303,81 @@ namespace BilliardPhysics.Tests
             Assert.IsTrue(ball.LinearVelocity.X >= Fix64.Zero,
                 "Ball in open space must not spontaneously reverse direction.");
         }
+
+        // ── Phantom collision / straight-line trajectory regression ──────────────
+
+        /// <summary>
+        /// Deterministic regression test for the phantom-collision bug.
+        /// A single ball with no nearby cushions or other balls must travel in a
+        /// perfectly straight line: its Y velocity must remain exactly zero and its
+        /// speed must never increase.
+        /// </summary>
+        [Test]
+        public void Step_SingleBallFreeSpace_TrajectoryDirectionStable()
+        {
+            var world = new PhysicsWorld2D();
+
+            // Place a distant cushion to exercise the segment-broadphase code paths
+            // without being close enough for any real collision.
+            world.SetTableSegments(new[] { MakeVerticalSegment(50000f, -5000f, 5000f) });
+
+            var ball = new Ball(0);
+            ball.Position       = new FixVec2(Fix64.Zero, Fix64.Zero);
+            ball.LinearVelocity = new FixVec2(Fix64.From(300), Fix64.Zero);
+            world.AddBall(ball);
+
+            Fix64 prevSpeed = ball.LinearVelocity.Magnitude;
+
+            for (int step = 0; step < 60; step++)
+            {
+                world.Step();
+
+                if (ball.IsMotionless) break;
+
+                // Y velocity must remain exactly zero — no lateral phantom impulse.
+                Assert.AreEqual(Fix64.Zero, ball.LinearVelocity.Y,
+                    $"Ball must not acquire lateral velocity at step {step}.");
+
+                // Speed must only decrease (friction), never jump upward.
+                Fix64 speed = ball.LinearVelocity.Magnitude;
+                Assert.IsTrue(speed <= prevSpeed,
+                    $"Speed must not increase at step {step}: " +
+                    $"was {prevSpeed.ToFloat():F3}, now {speed.ToFloat():F3}.");
+
+                prevSpeed = speed;
+            }
+        }
+
+        /// <summary>
+        /// Regression test: a ball whose path passes very close to a segment endpoint
+        /// but does NOT actually touch it (closest approach > ball radius) must not
+        /// receive a phantom collision impulse that changes its Y velocity.
+        /// </summary>
+        [Test]
+        public void Step_BallPassesNearSegmentEndpoint_NoPhantomDeflection()
+        {
+            var world = new PhysicsWorld2D();
+
+            // Segment endpoint at (500, 100).  Ball travels along Y=0, so its path
+            // passes 100 units from the endpoint — well beyond the ball radius (~28.6 u).
+            // No collision should be detected or resolved.
+            var seg = new Segment(
+                new FixVec2(Fix64.From(500), Fix64.From(-500)),
+                new FixVec2(Fix64.From(500), Fix64.From( 100)));
+            world.SetTableSegments(new[] { seg });
+
+            var ball = new Ball(0);
+            ball.Position       = new FixVec2(Fix64.Zero, Fix64.Zero);
+            ball.LinearVelocity = new FixVec2(Fix64.From(30000), Fix64.Zero);
+            world.AddBall(ball);
+
+            world.Step();
+
+            // Ball must still travel in the +X direction without lateral deflection.
+            Assert.IsTrue(ball.LinearVelocity.X >= Fix64.Zero,
+                "Ball must not be reversed by a phantom cushion hit.");
+            Assert.AreEqual(Fix64.Zero, ball.LinearVelocity.Y,
+                "Ball must not acquire lateral velocity from a near-miss endpoint.");
+        }
     }
 }

@@ -79,6 +79,14 @@ namespace BilliardPhysics
 
             if (aCoeff == Fix64.Zero) return false;
 
+            // Already overlapping the vertex: resolve at t=0 only if approaching.
+            if (cCoeff <= Fix64.Zero)
+            {
+                if (bCoeff >= Fix64.Zero) return false;  // already separating despite overlap
+                toi = Fix64.Zero;
+                return true;
+            }
+
             Fix64 disc = bCoeff * bCoeff - Fix64.From(4) * aCoeff * cCoeff;
             if (disc < Fix64.Zero) return false;
 
@@ -90,6 +98,11 @@ namespace BilliardPhysics
             toi = t;
             return true;
         }
+
+        // Small safety margin (in world/physics units) added to broadphase distance checks
+        // so that objects just barely within reach are not incorrectly culled by integer
+        // rounding.  Ball radii are ~28.6 units, so 1 unit is safely sub-radius.
+        private static readonly Fix64 BroadphaseTolerance = Fix64.From(1);
 
         // ── Swept circle vs segment ───────────────────────────────────────────────
 
@@ -145,8 +158,13 @@ namespace BilliardPhysics
             }
 
             // ── Test all polyline vertices (Start, every CP, End) as point circles ──
+            Fix64 ballSpeed = ball.LinearVelocity.Magnitude;
             foreach (FixVec2 pt in points)
             {
+                // Broadphase: skip vertex if the ball cannot possibly reach it this step.
+                Fix64 ptDist = FixVec2.Distance(ball.Position, pt);
+                if (ptDist > ball.Radius + ballSpeed * dt + BroadphaseTolerance) continue;
+
                 Fix64 ptToi;
                 if (SweptCirclePoint(ball, pt, dt, out ptToi))
                 {
@@ -195,6 +213,13 @@ namespace BilliardPhysics
                 for (int j = i + 1; j < balls.Count; j++)
                 {
                     if (balls[j].IsPocketed) continue;
+
+                    // Broadphase: skip if balls cannot possibly reach each other this step.
+                    Fix64 dist       = FixVec2.Distance(balls[i].Position, balls[j].Position);
+                    Fix64 radSum     = balls[i].Radius + balls[j].Radius;
+                    Fix64 maxApproach = (balls[i].LinearVelocity.Magnitude +
+                                         balls[j].LinearVelocity.Magnitude) * dt;
+                    if (dist > radSum + maxApproach + BroadphaseTolerance) continue;
 
                     Fix64 toi;
                     if (SweptCircleCircle(balls[i], balls[j], dt, out toi))

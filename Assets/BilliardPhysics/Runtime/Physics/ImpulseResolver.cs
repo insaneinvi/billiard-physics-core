@@ -8,6 +8,9 @@ namespace BilliardPhysics
         {
             FixVec2 n = (b.Position - a.Position).Normalized;
 
+            // Guard: skip if positions are coincident and normal is degenerate.
+            if (n == FixVec2.Zero) return;
+
             // Vectors from centre to contact point.
             FixVec2 ra = n  * a.Radius;
             FixVec2 rb = -n * b.Radius;
@@ -72,6 +75,10 @@ namespace BilliardPhysics
         public static void ResolveBallCushion(Ball ball, FixVec2 hitNormal)
         {
             FixVec2 n = hitNormal;
+
+            // Guard: skip if the hit normal is degenerate (zero-length or computed from
+            // a vertex where the ball centre coincided with the contact point).
+            if (n == FixVec2.Zero) return;
 
             // Vector from ball centre to contact point (on ball surface toward wall).
             FixVec2 r      = -n * ball.Radius;
