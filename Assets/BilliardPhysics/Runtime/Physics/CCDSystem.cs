@@ -241,25 +241,23 @@ namespace BilliardPhysics
                     Fix64 distToPocket = FixVec2.Distance(ball.Position, pocket.Center);
                     if (distToPocket > pocket.Radius) continue;
 
-                    foreach (Segment rimSeg in pocket.RimSegments)
+                    var rimSeg = pocket.RimSegments;
+                    Fix64   toi;
+                    FixVec2 hitNormal;
+                    if (SweptCircleSegment(ball, rimSeg, dt, out toi, out hitNormal))
                     {
-                        Fix64   toi;
-                        FixVec2 hitNormal;
-                        if (SweptCircleSegment(ball, rimSeg, dt, out toi, out hitNormal))
+                        if (!best.Hit || toi < best.TOI ||
+                            (toi == best.TOI && ball.Id < best.BallA))
                         {
-                            if (!best.Hit || toi < best.TOI ||
-                                (toi == best.TOI && ball.Id < best.BallA))
+                            best = new TOIResult
                             {
-                                best = new TOIResult
-                                {
-                                    Hit        = true,
-                                    TOI        = toi,
-                                    BallA      = ball.Id,
-                                    Segment    = rimSeg,
-                                    HitNormal  = hitNormal,
-                                    IsBallBall = false
-                                };
-                            }
+                                Hit        = true,
+                                TOI        = toi,
+                                BallA      = ball.Id,
+                                Segment    = rimSeg,
+                                HitNormal  = hitNormal,
+                                IsBallBall = false
+                            };
                         }
                     }
                 }

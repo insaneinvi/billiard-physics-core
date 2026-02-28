@@ -15,12 +15,15 @@ public class BilliardTest : MonoBehaviour
     // Start is called before the first frame update
     private Dictionary<int, GameObject> ballDict;
     private Dictionary<int, GameObject> ballShadowDict;
-    
+
+    private Ball cueBall;
     private PhysicsWorld2D _physicsWorld;
+
+    private bool isAllBallMotionless = false;
     void Start()
     {
         var rackResult = BallRackHelper.GenerateRack();
-        InitPhysicsWorld(rackResult);
+        InitPhysicsWorldAndBall(rackResult);
         InitViewWorld(rackResult);
         var stepInterval = 1 / 60f;
         Time.fixedDeltaTime = stepInterval;
@@ -65,7 +68,7 @@ public class BilliardTest : MonoBehaviour
             ballShadowDict.Add(ob.Number, ballShadow);
         }
     }
-    private void InitPhysicsWorld(RackResult  rackResult)
+    private void InitPhysicsWorldAndBall(RackResult  rackResult)
     {
         var physicsData = Resources.Load<TextAsset>("Data/tb8h");
         var (tableSegments, pockets) = TableAndPocketBinaryLoader.Load(physicsData);
@@ -76,7 +79,7 @@ public class BilliardTest : MonoBehaviour
             _physicsWorld.AddPocket(pocket);
         }
 
-        var cueBall = new Ball(0);
+        cueBall = new Ball(0);
         cueBall.Position = new FixVec2(Fix64.FromFloat(rackResult.CueBall.Position.x),  Fix64.FromFloat(rackResult.CueBall.Position.y));
         _physicsWorld.AddBall(cueBall);
         
@@ -88,4 +91,39 @@ public class BilliardTest : MonoBehaviour
         }
     }
 
+    private void FixedUpdate()
+    {
+        _physicsWorld.Step();
+
+        foreach (var ball in _physicsWorld.Balls)
+        {
+            if(ball.IsPocketed)continue;
+            var ballObj = ballDict[ball.Id];
+            var ballShadowObj = ballShadowDict[ball.Id];
+
+            ballObj.transform.position = new Vector3(ball.Position.X.ToFloat(), ball.Position.Y.ToFloat(), -BallRackHelper.HalfBallDiameter);
+            ballObj.transform.rotation = ball.Rotation;
+            ballShadowObj.transform.position = new Vector3( ballObj.transform.position.x + 15,   ballObj.transform.position.y+5, -0.1f );
+        }
+
+        isAllBallMotionless = IsAllBallMotionless();
+
+    }
+
+    private bool IsAllBallMotionless()
+    {
+        foreach (var physicsWorldBall in _physicsWorld.Balls)
+        {
+            if (!physicsWorldBall.IsMotionless) return false;
+        }
+        return true;
+    }
+
+    public void OnShoot()
+    {
+        if (!isAllBallMotionless) return;
+        FixVec2 direction = new FixVec2(Fix64.One, Fix64.Zero).Normalized;
+        Fix64 strength = Fix64.From(160000);
+        _physicsWorld.ApplyCueStrike(cueBall, direction, strength, Fix64.Zero, Fix64.Zero);
+    }
 }

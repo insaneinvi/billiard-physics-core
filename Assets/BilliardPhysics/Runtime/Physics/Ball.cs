@@ -11,6 +11,7 @@ namespace BilliardPhysics
         public FixVec2    Position;
         public FixVec2    LinearVelocity;
         public Fix64      AngularVelocity;
+        public bool       IsMotionless;
         public bool       IsPocketed;
 
         // ── Rendering ─────────────────────────────────────────────────────────────
@@ -61,6 +62,7 @@ namespace BilliardPhysics
         {
             LinearVelocity  = FixVec2.Zero;
             AngularVelocity = Fix64.Zero;
+            IsMotionless    = true;
             IsPocketed      = false;
             Rotation        = Quaternion.identity;
         }

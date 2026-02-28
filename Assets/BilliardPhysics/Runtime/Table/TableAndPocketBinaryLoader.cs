@@ -156,7 +156,7 @@ namespace BilliardPhysics
                     if (hasConnectionPoints)
                         rimCps = ReadConnectionPoints(reader, $"pocket {i} rim segment {j}");
 
-                    pocket.RimSegments.Add(new Segment(rimStart, rimEnd, rimCps));
+                    pocket.RimSegments = new Segment(rimStart, rimEnd, rimCps);
                 }
 
                 pockets.Add(pocket);

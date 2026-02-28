@@ -23,7 +23,13 @@ namespace BilliardPhysics
             bool linearStopped  = speed  < Epsilon;
             bool angularStopped = angAbs < Epsilon;
 
-            if (linearStopped && angularStopped) return;
+            if (linearStopped && angularStopped)
+            {
+                ball.IsMotionless = true;   
+                return;
+            }
+
+            ball.IsMotionless = false;
 
             // Rolling condition: |v| ≈ |ω| * r
             Fix64 rollingSpeed = angAbs * ball.Radius;

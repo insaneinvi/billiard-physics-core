@@ -45,6 +45,7 @@ public static class BallRackHelper
     const float ApexX = TableLength * 0.75f;
     const float CenterY = TableWidth * 0.5f;
 
+    public const float HalfBallDiameter = BallDiameter / 2;
     // 预计算三角阵型位置（只算一次）
     static readonly Vector3[] RackPositions = GenerateRackPositions();
 
@@ -62,7 +63,7 @@ public static class BallRackHelper
         result.CueBall = new BallData(
             0,
             BallType.Cue,
-            new Vector3(TableLength * 0.25f, CenterY,-BallDiameter/2)
+            new Vector3(TableLength * 0.25f, CenterY,-HalfBallDiameter)
         );
 
         // ===== 号码池 =====
@@ -128,7 +129,7 @@ public static class BallRackHelper
         return new Vector3(
             TableWidth - pos.y,
             pos.x,
-            -BallDiameter/2
+            -HalfBallDiameter
         );
     }
 
@@ -186,7 +187,7 @@ public static class BallRackHelper
                 pos[index++] = new Vector3(
                     x,
                     startY + col * Spacing,
-                    -BallDiameter/2
+                    -HalfBallDiameter
                 );
             }
         }
