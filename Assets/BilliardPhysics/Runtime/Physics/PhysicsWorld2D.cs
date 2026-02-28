@@ -15,8 +15,9 @@ namespace BilliardPhysics
 
         private const int MaxSubSteps = 20;
 
-        /// <summary>Fraction of pocket radius within which a slow ball is captured.</summary>
-        private static readonly Fix64 CaptureRadiusFactor = Fix64.Half;
+        private static readonly Fix64 CaptureRadiusFactor = Fix64.One;
+        // A factor of 1 means the ball is captured as soon as its centre enters
+        // the full pocket radius.  Formerly 0.5 (half radius), which was too restrictive.
 
         // Small epsilon added to remaining time after a collision to avoid re-triggering
         // the same contact in the next sub-step.  The value (1e-5 s) is large enough to
@@ -63,6 +64,7 @@ namespace BilliardPhysics
                     // No collision: advance all balls for the full remaining time.
                     foreach (Ball ball in _balls)
                         MotionSimulator.Step(ball, remainingTime);
+                    CheckPocketCaptures();
                     break;
                 }
 
@@ -115,8 +117,7 @@ namespace BilliardPhysics
                 foreach (Pocket pocket in _pockets)
                 {
                     Fix64 dist = FixVec2.Distance(ball.Position, pocket.Center);
-                    if (dist < pocket.Radius * CaptureRadiusFactor &&
-                        ball.LinearVelocity.Magnitude < pocket.ReboundVelocityThreshold)
+                    if (dist < pocket.Radius * CaptureRadiusFactor)
                     {
                         ball.IsPocketed       = true;
                         ball.LinearVelocity   = FixVec2.Zero;

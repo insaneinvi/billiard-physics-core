@@ -43,6 +43,14 @@ namespace BilliardPhysics
                 return false;
             }
 
+            // Balls are already overlapping: resolve immediately if they are approaching.
+            if (cCoeff <= Fix64.Zero)
+            {
+                if (bCoeff >= Fix64.Zero) return false;  // already separating despite overlap
+                toi = Fix64.Zero;
+                return true;
+            }
+
             Fix64 disc = bCoeff * bCoeff - Fix64.From(4) * aCoeff * cCoeff;
             if (disc < Fix64.Zero) return false;
 
@@ -235,32 +243,8 @@ namespace BilliardPhysics
                     }
                 }
 
-                // Pocket rim segments (only when ball is near the pocket).
-                foreach (Pocket pocket in pockets)
-                {
-                    Fix64 distToPocket = FixVec2.Distance(ball.Position, pocket.Center);
-                    if (distToPocket > pocket.Radius) continue;
-
-                    var rimSeg = pocket.RimSegment;
-                    Fix64   toi;
-                    FixVec2 hitNormal;
-                    if (SweptCircleSegment(ball, rimSeg, dt, out toi, out hitNormal))
-                    {
-                        if (!best.Hit || toi < best.TOI ||
-                            (toi == best.TOI && ball.Id < best.BallA))
-                        {
-                            best = new TOIResult
-                            {
-                                Hit        = true,
-                                TOI        = toi,
-                                BallA      = ball.Id,
-                                Segment    = rimSeg,
-                                HitNormal  = hitNormal,
-                                IsBallBall = false
-                            };
-                        }
-                    }
-                }
+                // Pockets are trigger volumes, not solid walls; rim segments are not
+                // tested for collision here.  Capture is handled by CheckPocketCaptures.
             }
 
             return best;
