@@ -16,9 +16,9 @@ public struct BallData
 {
     public int Number;
     public BallType Type;
-    public Vector2 Position;
+    public Vector3 Position;
 
-    public BallData(int number, BallType type, Vector2 position)
+    public BallData(int number, BallType type, Vector3 position)
     {
         Number = number;
         Type = type;
@@ -46,7 +46,7 @@ public static class BallRackHelper
     const float CenterY = TableWidth * 0.5f;
 
     // 预计算三角阵型位置（只算一次）
-    static readonly Vector2[] RackPositions = GenerateRackPositions();
+    static readonly Vector3[] RackPositions = GenerateRackPositions();
 
     // =========================================================
     // 主入口：生成球堆
@@ -62,7 +62,7 @@ public static class BallRackHelper
         result.CueBall = new BallData(
             0,
             BallType.Cue,
-            new Vector2(TableLength * 0.25f, CenterY)
+            new Vector3(TableLength * 0.25f, CenterY,-BallDiameter/2)
         );
 
         // ===== 号码池 =====
@@ -123,11 +123,12 @@ public static class BallRackHelper
     // x' = 1270 - y
     // y' = x
     // =========================================================
-    public static Vector2 RotateLeft90AndShift(Vector2 pos)
+    public static Vector3 RotateLeft90AndShift(Vector3 pos)
     {
-        return new Vector2(
+        return new Vector3(
             TableWidth - pos.y,
-            pos.x
+            pos.x,
+            -BallDiameter/2
         );
     }
 
@@ -164,9 +165,9 @@ public static class BallRackHelper
     // =========================================================
     // 预计算阵型
     // =========================================================
-    static Vector2[] GenerateRackPositions()
+    static Vector3[] GenerateRackPositions()
     {
-        Vector2[] pos = new Vector2[15];
+        Vector3[] pos = new Vector3[15];
 
         float rowOffsetX = Spacing * Mathf.Sin(Mathf.Deg2Rad * 60f);
         float rowOffsetY = Spacing * 0.5f;
@@ -182,9 +183,10 @@ public static class BallRackHelper
 
             for (int col = 0; col < count; col++)
             {
-                pos[index++] = new Vector2(
+                pos[index++] = new Vector3(
                     x,
-                    startY + col * Spacing
+                    startY + col * Spacing,
+                    -BallDiameter/2
                 );
             }
         }

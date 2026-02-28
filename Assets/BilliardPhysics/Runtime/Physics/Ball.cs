@@ -21,8 +21,8 @@ namespace BilliardPhysics
         public Fix64 SpinFriction;
 
         // ── Standard defaults ─────────────────────────────────────────────────────
-        public static readonly Fix64 StandardRadius = Fix64.One * Fix64.Half;  // 0.5 units
-        public static readonly Fix64 StandardMass   = Fix64.One;
+        public static readonly Fix64 StandardRadius = Fix64.FromFloat(28.575f);  // 0.5 units
+        public static readonly Fix64 StandardMass   = Fix64.From(160);
 
         /// <param name="id">Unique ball identifier.</param>
         /// <param name="radius">Ball radius in physics units.</param>
