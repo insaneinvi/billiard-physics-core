@@ -43,6 +43,11 @@ namespace BilliardPhysics
             return From(raw) / From(scale);
         }
 
+        // ── Conversion methods ────────────────────────────────────────────────────
+        public float ToFloat() => (float)RawValue / 4294967296f;
+        public int   ToInt()   => (int)(RawValue >> 32);
+        public long  ToLong()  => RawValue >> 32;
+
         // ── Implicit conversions ──────────────────────────────────────────────────
         public static implicit operator Fix64(int value)  => From(value);
         public static implicit operator Fix64(long value) => From(value);
