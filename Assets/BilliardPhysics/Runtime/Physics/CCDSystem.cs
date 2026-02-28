@@ -241,7 +241,7 @@ namespace BilliardPhysics
                     Fix64 distToPocket = FixVec2.Distance(ball.Position, pocket.Center);
                     if (distToPocket > pocket.Radius) continue;
 
-                    var rimSeg = pocket.RimSegments;
+                    var rimSeg = pocket.RimSegment;
                     Fix64   toi;
                     FixVec2 hitNormal;
                     if (SweptCircleSegment(ball, rimSeg, dt, out toi, out hitNormal))
