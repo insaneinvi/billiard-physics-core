@@ -16,8 +16,9 @@ namespace BilliardPhysics
             FixVec2 rb = -n * b.Radius;
 
             // Velocity at contact point (linear + angular contribution).
-            FixVec2 va_contact = a.LinearVelocity + a.AngularVelocity * ra.Perp();
-            FixVec2 vb_contact = b.LinearVelocity + b.AngularVelocity * rb.Perp();
+            // In Z-down frame, ω × r for an in-plane r reduces to ω.Z * r.Perp().
+            FixVec2 va_contact = a.LinearVelocity + a.AngularVelocity.Z * ra.Perp();
+            FixVec2 vb_contact = b.LinearVelocity + b.AngularVelocity.Z * rb.Perp();
             FixVec2 v_rel      = va_contact - vb_contact;
 
             Fix64 v_rel_n = FixVec2.Dot(v_rel, n);
@@ -39,10 +40,10 @@ namespace BilliardPhysics
             Fix64 j = -(Fix64.One + e) * v_rel_n / denom;
 
             // Apply normal impulse.
-            a.LinearVelocity  += n *  (j / a.Mass);
-            b.LinearVelocity  -= n *  (j / b.Mass);
-            a.AngularVelocity += raPerpDotN * j / a.Inertia;
-            b.AngularVelocity -= rbPerpDotN * j / b.Inertia;
+            a.LinearVelocity    += n *  (j / a.Mass);
+            b.LinearVelocity    -= n *  (j / b.Mass);
+            a.AngularVelocity.Z += raPerpDotN * j / a.Inertia;
+            b.AngularVelocity.Z -= rbPerpDotN * j / b.Inertia;
 
             // ── Tangential (friction) impulse ─────────────────────────────────────
             // Recalculate relative velocity with updated linear (angular unchanged here).
@@ -60,10 +61,10 @@ namespace BilliardPhysics
             Fix64 maxFrict = Fix64.Abs(j) * avgFrict;
             Fix64 jt       = Clamp(jt_raw, -maxFrict, maxFrict);
 
-            a.LinearVelocity  += tangent *  (jt / a.Mass);
-            b.LinearVelocity  -= tangent *  (jt / b.Mass);
-            a.AngularVelocity += raPerpDotT * jt / a.Inertia;
-            b.AngularVelocity -= rbPerpDotT * jt / b.Inertia;
+            a.LinearVelocity    += tangent *  (jt / a.Mass);
+            b.LinearVelocity    -= tangent *  (jt / b.Mass);
+            a.AngularVelocity.Z += raPerpDotT * jt / a.Inertia;
+            b.AngularVelocity.Z -= rbPerpDotT * jt / b.Inertia;
         }
 
         // ── Ball–cushion collision ────────────────────────────────────────────────
@@ -84,8 +85,8 @@ namespace BilliardPhysics
             FixVec2 r      = -n * ball.Radius;
             FixVec2 rPerp  = r.Perp();
 
-            // Velocity at contact point.
-            FixVec2 v_contact = ball.LinearVelocity + ball.AngularVelocity * rPerp;
+            // Velocity at contact point (ω.Z drives the in-plane angular contribution).
+            FixVec2 v_contact = ball.LinearVelocity + ball.AngularVelocity.Z * rPerp;
             Fix64   v_rel_n   = FixVec2.Dot(v_contact, n);
             if (v_rel_n >= Fix64.Zero) return;
 
@@ -94,8 +95,8 @@ namespace BilliardPhysics
             Fix64 denomN     = Fix64.One / ball.Mass + rPerpDotN * rPerpDotN / ball.Inertia;
             Fix64 jn         = -(Fix64.One + e) * v_rel_n / denomN;
 
-            ball.LinearVelocity  += n * (jn / ball.Mass);
-            ball.AngularVelocity += rPerpDotN * jn / ball.Inertia;
+            ball.LinearVelocity    += n * (jn / ball.Mass);
+            ball.AngularVelocity.Z += rPerpDotN * jn / ball.Inertia;
 
             // ── Tangential friction ───────────────────────────────────────────────
             FixVec2 tangent    = n.Perp();
@@ -106,8 +107,8 @@ namespace BilliardPhysics
             Fix64   maxFrict   = Fix64.Abs(jn) * ball.SlidingFriction;
             Fix64   jt         = Clamp(jt_raw, -maxFrict, maxFrict);
 
-            ball.LinearVelocity  += tangent * (jt / ball.Mass);
-            ball.AngularVelocity += rPerpDotT * jt / ball.Inertia;
+            ball.LinearVelocity    += tangent * (jt / ball.Mass);
+            ball.AngularVelocity.Z += rPerpDotT * jt / ball.Inertia;
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────────
