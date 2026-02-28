@@ -159,7 +159,7 @@ namespace BilliardPhysics
                     {
                         ball.IsPocketed       = true;
                         ball.LinearVelocity   = FixVec2.Zero;
-                        ball.AngularVelocity  = Fix64.Zero;
+                        ball.AngularVelocity  = FixVec3.Zero;
                         break;
                     }
                 }

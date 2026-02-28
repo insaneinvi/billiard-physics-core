@@ -379,5 +379,101 @@ namespace BilliardPhysics.Tests
             Assert.AreEqual(Fix64.Zero, ball.LinearVelocity.Y,
                 "Ball must not acquire lateral velocity from a near-miss endpoint.");
         }
+
+        // ── 2.5D spin: sliding → rolling develops XY angular velocity ─────────────
+
+        /// <summary>
+        /// Scene 1: A ball given a linear velocity with zero spin must develop
+        /// XY angular velocity through table friction, indicating rolling onset.
+        /// ω.Y must become non-zero, and ball.Rotation must change from identity.
+        /// </summary>
+        [Test]
+        public void Step_SlidingBallZeroSpin_DevelopsRollingOmegaXY()
+        {
+            var ball = new Ball(0);
+            ball.Position       = FixVec2.Zero;
+            ball.LinearVelocity = new FixVec2(Fix64.From(300), Fix64.Zero);
+            // Zero initial angular velocity.
+
+            var dt = Fix64.One / Fix64.From(60);
+
+            // Run enough steps for friction to build up rolling-direction spin.
+            for (int i = 0; i < 100; i++)
+                MotionSimulator.Step(ball, dt);
+
+            // ω.Y must be non-zero (table friction drives rolling around Y for +X motion).
+            Assert.AreNotEqual(Fix64.Zero, ball.AngularVelocity.Y,
+                "Table friction must develop ω.Y for a ball sliding in +X.");
+
+            // Contact-point slip must be significantly reduced from the initial value (300).
+            Fix64 vtX = ball.LinearVelocity.X + ball.AngularVelocity.Y * ball.Radius;
+            Fix64 vtY = ball.LinearVelocity.Y - ball.AngularVelocity.X * ball.Radius;
+            Fix64 slip = Fix64.Sqrt(vtX * vtX + vtY * vtY);
+            Assert.IsTrue(slip < Fix64.From(300),
+                $"Contact-point slip must decrease; actual={slip.ToFloat():F3}");
+
+            // Rotation must have a non-trivial Y component (axis is not pure Z):
+            // after 100 steps with growing ω.Y, accumulated angle ≈ 12 degrees → |y| ≈ 0.1.
+            Assert.AreNotEqual(0f, ball.Rotation.y, 0.01f,
+                "Ball rotation must have Y component (non-Z axis) after sliding friction steps.");
+        }
+
+        /// <summary>
+        /// Scene 2: A stationary ball injected with top-spin (ω.Y < 0, forward rolling
+        /// direction for +X) must acquire positive X linear velocity through table friction.
+        /// </summary>
+        [Test]
+        public void Step_StaticBallWithTopSpin_DevelopsLinearVelocity()
+        {
+            var ball = new Ball(0);
+            ball.Position       = FixVec2.Zero;
+            ball.LinearVelocity = FixVec2.Zero;
+            // Inject top-spin: ω.Y < 0 drives +X motion when ball contacts the table.
+            ball.AngularVelocity = new FixVec3(Fix64.Zero, Fix64.From(-10), Fix64.Zero);
+
+            var dt = Fix64.One / Fix64.From(60);
+
+            // Run a step; friction coupling must transfer spin energy into linear motion.
+            MotionSimulator.Step(ball, dt);
+
+            Assert.IsTrue(ball.LinearVelocity.X > Fix64.Zero,
+                "Top-spin (ω.Y < 0) on a static ball must produce positive X linear velocity.");
+        }
+
+        /// <summary>
+        /// Scene 3: A ball with side-spin only (ω.Z ≠ 0) must not spontaneously
+        /// acquire linear velocity (Z-spin has no table-friction coupling to XY motion)
+        /// and the spin must decay over time via SpinFriction.
+        /// </summary>
+        [Test]
+        public void Step_StaticBallWithSideSpin_SpinDecaysNoLinearVelocity()
+        {
+            var ball = new Ball(0);
+            ball.Position       = FixVec2.Zero;
+            ball.LinearVelocity = FixVec2.Zero;
+            // Pure side-spin (english).
+            ball.AngularVelocity = new FixVec3(Fix64.Zero, Fix64.Zero, Fix64.From(50));
+
+            var dt = Fix64.One / Fix64.From(60);
+
+            Fix64 prevOmegaZ = ball.AngularVelocity.Z;
+            for (int i = 0; i < 30; i++)
+            {
+                MotionSimulator.Step(ball, dt);
+
+                // Linear velocity must remain exactly zero (side spin has no XY coupling).
+                Assert.AreEqual(FixVec2.Zero, ball.LinearVelocity,
+                    $"Side-spin must not produce linear velocity at step {i}.");
+
+                // Z-spin must only decrease.
+                Assert.IsTrue(ball.AngularVelocity.Z <= prevOmegaZ,
+                    $"Side-spin ω.Z must decay monotonically at step {i}.");
+                prevOmegaZ = ball.AngularVelocity.Z;
+            }
+
+            // After 30 steps spin should be noticeably reduced.
+            Assert.IsTrue(ball.AngularVelocity.Z < Fix64.From(50),
+                "Side-spin must have decayed after 30 steps.");
+        }
     }
 }
