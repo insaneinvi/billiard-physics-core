@@ -200,13 +200,36 @@ namespace BilliardPhysics
             return SweptCircleSegment(ball, seg, dt, out toi, out dummy);
         }
 
+        // ── Performance counters ─────────────────────────────────────────────────
+
+        /// <summary>
+        /// Cumulative number of <see cref="SweptCircleSegment"/> calls made from
+        /// <see cref="FindEarliestCollision"/> since the last <see cref="ResetStats"/>.
+        /// Useful for comparing brute-force vs grid-accelerated broadphase.
+        /// </summary>
+        public static int NarrowPhaseSegmentCalls;
+
+        /// <summary>Resets all performance counters to zero.</summary>
+        public static void ResetStats() => NarrowPhaseSegmentCalls = 0;
+
+        // Scratch buffer for candidate segments returned by the spatial grid.
+        // Single-threaded use only (physics loop is always single-threaded).
+        private static readonly List<Segment> _candidateSegments = new List<Segment>();
+
         // ── Find earliest collision ───────────────────────────────────────────────
 
+        /// <summary>
+        /// Finds the earliest collision within [0, dt].
+        /// When <paramref name="segmentGrid"/> is supplied the ball–cushion broadphase
+        /// uses the grid to skip distant segments; otherwise every segment is tested
+        /// (original brute-force behaviour, preserved for backwards compatibility).
+        /// </summary>
         public static TOIResult FindEarliestCollision(
             List<Ball>    balls,
             List<Segment> segments,
             List<Pocket>  pockets,
-            Fix64         dt)
+            Fix64         dt,
+            SegmentGrid   segmentGrid = null)
         {
             TOIResult best = new TOIResult { Hit = false, TOI = dt };
 
@@ -250,8 +273,32 @@ namespace BilliardPhysics
                 if (balls[i].IsPocketed) continue;
                 Ball ball = balls[i];
 
-                foreach (Segment seg in segments)
+                // Determine candidate segments via grid broadphase (or all segments).
+                IList<Segment> candidates;
+                if (segmentGrid != null)
                 {
+                    // Swept AABB of the ball over this substep (directional, not circular).
+                    Fix64 velocityDisplacementX = ball.LinearVelocity.X * dt;
+                    Fix64 velocityDisplacementY = ball.LinearVelocity.Y * dt;
+                    Fix64 r   = ball.Radius + BroadphaseTolerance;
+                    _candidateSegments.Clear();
+                    segmentGrid.Query(
+                        ball.Position.X - r + Fix64.Min(velocityDisplacementX, Fix64.Zero),
+                        ball.Position.Y - r + Fix64.Min(velocityDisplacementY, Fix64.Zero),
+                        ball.Position.X + r + Fix64.Max(velocityDisplacementX, Fix64.Zero),
+                        ball.Position.Y + r + Fix64.Max(velocityDisplacementY, Fix64.Zero),
+                        _candidateSegments);
+                    candidates = _candidateSegments;
+                }
+                else
+                {
+                    candidates = segments;
+                }
+
+                for (int si = 0; si < candidates.Count; si++)
+                {
+                    Segment seg = candidates[si];
+                    NarrowPhaseSegmentCalls++;
                     Fix64   toi;
                     FixVec2 hitNormal;
                     if (SweptCircleSegment(ball, seg, dt, out toi, out hitNormal))
