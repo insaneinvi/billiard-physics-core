@@ -331,7 +331,7 @@ namespace BilliardPhysics.Editor
         // ── Fixed-Point Binary Export ──────────────────────────────────────
         // 0x59485042 is the uint whose little-endian bytes are 0x42,0x50,0x48,0x59 = 'B','P','H','Y'.
         private const uint   k_exportMagic   = 0x59485042u;
-        private const ushort k_exportVersion = 2;
+        private const ushort k_exportVersion = 3;
 
         private void ExportFixedBinary()
         {
@@ -412,13 +412,13 @@ namespace BilliardPhysics.Editor
                 EditorUtility.RevealInFinder(path);
         }
 
-        // ── Serialisation (version 2 format) ──────────────────────────
+        // ── Serialisation (version 3 format) ──────────────────────────
         // Writes the fixed-point binary body (header + table segments + pockets)
         // to <paramref name="writer"/>.  Separated from the UI flow so it can be
         // called independently and tested without any dialog interaction.
         //
-        // Version 2 layout per segment:  Start(x,y) + End(x,y) + CPCount + CP[0..n-1]
-        // This preserves ConnectionPoints; the runtime Segment is created 1-to-1.
+        // Version 3 layout per segment:  Start(x,y) + End(x,y) + CPCount + CP[0..n-1]
+        // Pocket rim: no rimSegCount prefix; one rim segment (Start/End + CPs) per pocket.
         private static void WriteFixedBinaryBody(
             System.IO.BinaryWriter writer, TableAndPocketAuthoring auth)
         {
@@ -448,8 +448,7 @@ namespace BilliardPhysics.Editor
                 writer.Write(Fix64.FromFloat(pocket.Radius).RawValue);
                 writer.Write(Fix64.FromFloat(pocket.ReboundVelocityThreshold).RawValue);
 
-                // Rim: one entry for the single RimSegments SegmentData.
-                writer.Write(1);  // rimSegCount = 1
+                // Rim: single SegmentData written directly (no rimSegCount prefix).
                 var rim = pocket.RimSegments;
                 writer.Write(Fix64.FromFloat(rim.Start.x).RawValue);
                 writer.Write(Fix64.FromFloat(rim.Start.y).RawValue);

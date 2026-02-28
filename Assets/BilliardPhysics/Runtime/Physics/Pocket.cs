@@ -7,7 +7,7 @@ namespace BilliardPhysics
         public int             Id;
         public FixVec2         Center;
         public Fix64           Radius;
-        public Segment         RimSegments;
+        public Segment         RimSegment;
         /// <summary>Speed below which a ball entering the pocket mouth is captured.</summary>
         public Fix64           ReboundVelocityThreshold;
 

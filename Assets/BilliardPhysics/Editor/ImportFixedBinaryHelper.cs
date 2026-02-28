@@ -112,16 +112,9 @@ namespace BilliardPhysics.Editor
         /// Converts a list of runtime <see cref="Pocket"/>s back to
         /// <see cref="PocketConfig"/> objects.
         ///
-        /// <para>All flat rim sub-segments stored in each pocket are collapsed back
-        /// into a single <see cref="SegmentData"/> with
-        /// <c>ConnectionPoints</c>, reversing the polyline expansion performed
-        /// during export:
-        /// <list type="bullet">
-        ///   <item><c>rimSeg.Start</c>  = flat[0].Start</item>
-        ///   <item><c>rimSeg.CP[k-1]</c> = flat[k].Start  (for k = 1..n-1)</item>
-        ///   <item><c>rimSeg.End</c>    = flat[n-1].End</item>
-        /// </list>
-        /// </para>
+        /// <para>The single runtime <see cref="Segment"/> stored in each pocket's
+        /// <c>RimSegment</c> is mapped directly to a <see cref="SegmentData"/>,
+        /// preserving any <c>ConnectionPoints</c>.</para>
         /// </summary>
         /// <param name="pockets">
         /// Runtime pockets loaded from the fixed binary asset.
@@ -135,33 +128,14 @@ namespace BilliardPhysics.Editor
             foreach (var pocket in pockets)
             {
                 var rimSeg = new SegmentData();
-                var rims   = pocket.RimSegments;
-                if (rims.Count == 1 && rims[0].ConnectionPoints != null &&
-                    rims[0].ConnectionPoints.Count > 0)
+                var rim    = pocket.RimSegment;
+                if (rim != null)
                 {
-                    // v2 format: single runtime Segment with embedded ConnectionPoints.
-                    rimSeg.Start = new Vector2(
-                        Fix64ToFloat(rims[0].Start.X),
-                        Fix64ToFloat(rims[0].Start.Y));
-                    rimSeg.End = new Vector2(
-                        Fix64ToFloat(rims[0].End.X),
-                        Fix64ToFloat(rims[0].End.Y));
-                    foreach (FixVec2 cp in rims[0].ConnectionPoints)
-                        rimSeg.ConnectionPoints.Add(new Vector2(Fix64ToFloat(cp.X), Fix64ToFloat(cp.Y)));
-                }
-                else if (rims.Count > 0)
-                {
-                    // v1 format (or single flat sub-segment): collapse all rim Segments.
-                    rimSeg.Start = new Vector2(
-                        Fix64ToFloat(rims[0].Start.X),
-                        Fix64ToFloat(rims[0].Start.Y));
-                    rimSeg.End = new Vector2(
-                        Fix64ToFloat(rims[rims.Count - 1].End.X),
-                        Fix64ToFloat(rims[rims.Count - 1].End.Y));
-                    for (int k = 1; k < rims.Count; k++)
-                        rimSeg.ConnectionPoints.Add(new Vector2(
-                            Fix64ToFloat(rims[k].Start.X),
-                            Fix64ToFloat(rims[k].Start.Y)));
+                    rimSeg.Start = new Vector2(Fix64ToFloat(rim.Start.X), Fix64ToFloat(rim.Start.Y));
+                    rimSeg.End   = new Vector2(Fix64ToFloat(rim.End.X),   Fix64ToFloat(rim.End.Y));
+                    if (rim.ConnectionPoints != null)
+                        foreach (FixVec2 cp in rim.ConnectionPoints)
+                            rimSeg.ConnectionPoints.Add(new Vector2(Fix64ToFloat(cp.X), Fix64ToFloat(cp.Y)));
                 }
 
                 result.Add(new PocketConfig
