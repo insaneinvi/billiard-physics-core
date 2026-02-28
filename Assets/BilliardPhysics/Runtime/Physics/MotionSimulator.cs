@@ -1,3 +1,5 @@
+using UnityEngine;
+
 namespace BilliardPhysics
 {
     /// <summary>
@@ -115,6 +117,11 @@ namespace BilliardPhysics
 
             // Integrate position.
             ball.Position += ball.LinearVelocity * dt;
+
+            // Integrate rotation (AngularVelocity in rad/s, around +Z axis).
+            Fix64 deltaRad = ball.AngularVelocity * dt;
+            float deltaDeg = (float)(deltaRad.RawValue) / (float)(1L << 32) * Mathf.Rad2Deg;
+            ball.Rotation  = (Quaternion.AngleAxis(deltaDeg, Vector3.forward) * ball.Rotation).normalized;
         }
     }
 }
