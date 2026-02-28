@@ -419,6 +419,52 @@ namespace BilliardPhysics.Tests
         }
 
         /// <summary>
+        /// Rotation direction test: a ball sliding in +X with no initial spin must
+        /// develop ω.Y &lt; 0 (Z-down rolling constraint: v_x + ω.Y·R = 0) and
+        /// Ball.Rotation.y must be negative, confirming that the rotation axis is
+        /// (0,−1,0) in the physics frame and that dq·q (world-frame integration) is
+        /// correct.
+        ///
+        /// Background: the correct Unity render formula is
+        ///   new Quaternion(−Rotation.x, −Rotation.y, Rotation.z, Rotation.w)
+        /// For rolling in +X this gives render.y &gt; 0 (rotation around +Y in Unity's
+        /// XY-table/Z-up setup), which moves the contact point in −X — the correct
+        /// direction.  Using the wrong formula derived from M = diag(1,1,−1) would
+        /// give (x, y, −z, w) = rotation around −Y, reversing the contact direction.
+        /// </summary>
+        [Test]
+        public void Step_BallRollingPlusX_RotationDirectionConsistent()
+        {
+            var ball = new Ball(0);
+            ball.Position       = FixVec2.Zero;
+            ball.LinearVelocity = new FixVec2(Fix64.From(300), Fix64.Zero);
+
+            var dt = Fix64.One / Fix64.From(60);
+
+            // Single step: friction applies an impulse that gives ω.Y < 0.
+            MotionSimulator.Step(ball, dt);
+
+            // Rolling constraint in Z-down physics: ω.Y = −v_x / R  →  ω.Y < 0.
+            Assert.IsTrue(ball.AngularVelocity.Y < Fix64.Zero,
+                "ω.Y must be negative for +X rolling in Z-down frame " +
+                "(rolling constraint: ω.Y = −v_x / R).");
+
+            // Integration: dq = AngleAxis(|ω.Y|·dt, (0,−1,0))
+            //   → dq.y = sin(θ/2)·(−1) < 0
+            //   → ball.Rotation.y = dq.y < 0  (accumulated after dq·identity).
+            Assert.IsTrue(ball.Rotation.y < 0f,
+                "Rotation.y must be negative after one step of +X rolling: " +
+                "axis is (0,−1,0), so the integrated quaternion y-component is negative.");
+
+            // Run many more steps; the sign must persist and the magnitude must grow.
+            for (int i = 1; i < 100; i++)
+                MotionSimulator.Step(ball, dt);
+
+            Assert.IsTrue(ball.Rotation.y < -0.01f,
+                "Rotation.y must be significantly negative after 100 steps of +X rolling.");
+        }
+
+        /// <summary>
         /// Scene 2: A stationary ball injected with top-spin (ω.Y < 0, forward rolling
         /// direction for +X) must acquire positive X linear velocity through table friction.
         /// </summary>

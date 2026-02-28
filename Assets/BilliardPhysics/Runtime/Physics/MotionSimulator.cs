@@ -6,8 +6,9 @@ namespace BilliardPhysics
     /// Advances ball linear and angular motion under friction, without resolving collisions.
     /// Coordinate convention: Z-down (+Z points toward the table; table normal n = (0,0,-1)).
     /// Ball center-to-contact-point vector: r = (0, 0, +Radius) (points in +Z, i.e. downward).
-    /// Ball.Rotation is integrated in this physics frame; apply the change-of-basis
-    /// R_render = M·R_physics·M (M = diag(1,1,-1)) before assigning to Unity's transform.rotation.
+    /// Ball.Rotation is integrated in this right-handed physics frame using world-frame ω
+    /// (q_new = dq * q_old).  Before assigning to Unity's transform.rotation apply the
+    /// handedness conversion described in Ball.Rotation's XML summary.
     /// </summary>
     public static class MotionSimulator
     {
@@ -135,8 +136,17 @@ namespace BilliardPhysics
             ball.Position += ball.LinearVelocity * dt;
 
             // ── Integrate rotation ────────────────────────────────────────────────
-            // Rotation axis = ω / |ω|; angle increment = |ω| * dt  (rad).
-            // Unlike the old code, the axis is NOT fixed to Z; it follows ω direction.
+            // ω is expressed in the world/table frame (it is derived from the
+            // rolling constraint which couples it to world-frame LinearVelocity).
+            // For world-frame ω the correct quaternion ODE is:
+            //   dq/dt = (1/2) · ω̃ · q   →   q_new = dq · q_old   (NOT q · dq)
+            // where dq = AngleAxis(|ω|·dt, ω/|ω|).
+            //
+            // The physics frame is right-handed (X×Y = +Z_down), which is the same
+            // handedness assumed by Unity's Quaternion.AngleAxis, so no axis-sign
+            // correction is required here.  The sign difference between this frame
+            // and Unity's left-handed display is handled at render time by the
+            // conversion in Ball.Rotation's XML summary.
             Fix64 omegaMag = ball.AngularVelocity.Magnitude;
             if (omegaMag > Epsilon)
             {

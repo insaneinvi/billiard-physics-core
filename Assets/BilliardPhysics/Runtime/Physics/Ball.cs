@@ -24,11 +24,22 @@ namespace BilliardPhysics
         /// <summary>
         /// 3D orientation for rendering. Updated each simulation step by integrating
         /// AngularVelocity (rad/s) around the ω direction (not fixed to any axis).
-        /// Stored in the physics coordinate system (Z-down: +Z toward table; table
-        /// normal = (0,0,-1)). Before assigning to Unity's Transform.rotation, apply
-        /// the change-of-basis conversion R_render = M·R_physics·M (M = diag(1,1,-1)),
-        /// which negates the quaternion X and Y components:
+        /// Stored in the physics coordinate system (Z-down, right-handed: +Z toward table;
+        /// table normal = (0,0,-1)).
+        ///
+        /// Before assigning to Unity's Transform.rotation apply the handedness conversion
+        /// that accounts for the sign difference between the physics right-handed Z-down
+        /// frame and Unity's left-handed display.  For a billiard table lying in Unity's
+        /// XY plane (Z toward viewer), negate the quaternion x and y components:
+        ///
         ///   transform.rotation = new Quaternion(-Rotation.x, -Rotation.y, Rotation.z, Rotation.w)
+        ///
+        /// Rationale: in Z-down physics the rolling-in-+X constraint gives ω.Y &lt; 0
+        /// (axis = (0,-1,0)), so Rotation.y accumulates negative.  Unity's left-handed
+        /// display requires the opposite sign on the X/Y rolling axes to reproduce the
+        /// same visual rotation direction, while the Z (side-spin) axis is unaffected.
+        /// Using the naive conjugation M·R·M for M = diag(1,1,-1) would instead give
+        /// (x, y, -z, w) — the wrong sign — and produces backwards rolling visually.
         /// </summary>
         public Quaternion Rotation = Quaternion.identity;
 
