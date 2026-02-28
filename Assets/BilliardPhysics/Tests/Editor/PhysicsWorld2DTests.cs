@@ -475,5 +475,44 @@ namespace BilliardPhysics.Tests
             Assert.IsTrue(ball.AngularVelocity.Z < Fix64.From(50),
                 "Side-spin must have decayed after 30 steps.");
         }
+
+        // ── Rotation direction: physics sign convention ───────────────────────────
+
+        /// <summary>
+        /// A ball sliding in +X must develop ω.Y &lt; 0 (rolling constraint in Z-down frame:
+        /// vtX = Lv.X + ω.Y·R = 0 ⟹ ω.Y = −Lv.X/R).
+        /// The physics Rotation quaternion must reflect this: the rotation axis is (0,−1,0),
+        /// so Rotation.y = sin(θ/2)·(−1) &lt; 0 after any positive angle accumulates.
+        /// This sign is correct: PhysicsToRenderRotation negates it (render.y &gt; 0),
+        /// producing a rotation around +Y in Unity that visually rolls the ball forward.
+        /// </summary>
+        [Test]
+        public void Step_BallRollingPlusX_RotationDirectionConsistent()
+        {
+            var ball = new Ball(0);
+            ball.Position       = FixVec2.Zero;
+            ball.LinearVelocity = new FixVec2(Fix64.From(300), Fix64.Zero);
+
+            var dt = Fix64.One / Fix64.From(60);
+
+            // After one step table friction develops ω.Y (rolling constraint for +X motion).
+            MotionSimulator.Step(ball, dt);
+
+            // Rolling constraint: ω.Y = −Lv.X/R < 0 for Lv.X > 0.
+            Assert.IsTrue(ball.AngularVelocity.Y < Fix64.Zero,
+                "Rolling in +X must develop ω.Y < 0 (Z-down rolling constraint).");
+
+            // Physics rotation: axis = (0,−1,0) → Rotation.y = sin(θ/2)·(−1) < 0.
+            Assert.IsTrue(ball.Rotation.y < 0f,
+                "Physics Rotation.y must be negative for ω.Y < 0 (axis = (0,−1,0)).");
+
+            // Run to 100 steps so the angle accumulates significantly.
+            for (int i = 1; i < 100; i++)
+                MotionSimulator.Step(ball, dt);
+
+            Assert.IsTrue(ball.Rotation.y < -0.01f,
+                "After 100 steps, physics Rotation.y must be significantly negative " +
+                "(accumulated rotation around −Y axis).");
+        }
     }
 }

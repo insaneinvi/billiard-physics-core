@@ -29,6 +29,13 @@ namespace BilliardPhysics
         /// the change-of-basis conversion R_render = M·R_physics·M (M = diag(1,1,-1)),
         /// which negates the quaternion X and Y components:
         ///   transform.rotation = new Quaternion(-Rotation.x, -Rotation.y, Rotation.z, Rotation.w)
+        ///
+        /// Note: the result is (-x,-y,z,w) — not the naive (x,y,-z,w) — because
+        /// det(M) = -1 (M is an improper transformation). Conjugating a rotation by an
+        /// improper M reverses the rotation angle, so the combined effect on each axis is:
+        ///   X-component: axis flipped by M  AND  angle reversed  → net sign flip on qx
+        ///   Y-component: same reasoning                           → net sign flip on qy
+        ///   Z-component: M flips Z  AND  angle reversed          → two sign flips cancel → qz unchanged
         /// </summary>
         public Quaternion Rotation = Quaternion.identity;
 
