@@ -1,0 +1,307 @@
+using System.Collections.Generic;
+using NUnit.Framework;
+using BilliardPhysics;
+
+namespace BilliardPhysics.Tests
+{
+    /// <summary>
+    /// EditMode regression tests for the three PhysicsWorld2D bugs:
+    ///   1. Ball-ball tunneling / penetration (overlapping balls not resolved).
+    ///   2. False rebounds from pocket rim segments (pockets not triggers).
+    ///   3. Pocketing does not work (CheckPocketCaptures not called on no-collision path).
+    /// </summary>
+    public class PhysicsWorld2DTests
+    {
+        // ── Helpers ───────────────────────────────────────────────────────────────
+
+        /// <summary>Creates a simple axis-aligned cushion segment at x = xPos.</summary>
+        private static Segment MakeVerticalSegment(float xPos, float yMin, float yMax)
+        {
+            return new Segment(
+                new FixVec2(Fix64.FromFloat(xPos), Fix64.FromFloat(yMin)),
+                new FixVec2(Fix64.FromFloat(xPos), Fix64.FromFloat(yMax)));
+        }
+
+        /// <summary>Creates a pocket centered at (cx, cy) with given radius.</summary>
+        private static Pocket MakePocket(float cx, float cy, float radius)
+        {
+            var center = new FixVec2(Fix64.FromFloat(cx), Fix64.FromFloat(cy));
+            return new Pocket(0, center, Fix64.FromFloat(radius));
+        }
+
+        // ── Bug 1: Ball-ball tunneling ────────────────────────────────────────────
+
+        /// <summary>
+        /// Two balls heading toward each other that are ALREADY overlapping must be
+        /// detected by SweptCircleCircle and resolved at toi = 0.
+        /// Before the fix: cCoeff less than 0 → earliest root is negative → returns false
+        /// (no collision detected, balls tunnel through each other).
+        /// After the fix: cCoeff less than or equal to 0 AND approaching → toi = 0, returns true.
+        /// </summary>
+        [Test]
+        public void SweptCircleCircle_OverlappingApproachingBalls_ReturnsHitAtZero()
+        {
+            var a = new Ball(0);
+            var b = new Ball(1);
+
+            // Place centres only 1 unit apart — far less than the combined radius (~57 units).
+            a.Position       = new FixVec2(Fix64.FromFloat(-0.5f), Fix64.Zero);
+            b.Position       = new FixVec2(Fix64.FromFloat( 0.5f), Fix64.Zero);
+            a.LinearVelocity = new FixVec2(Fix64.From(100), Fix64.Zero);
+            b.LinearVelocity = new FixVec2(Fix64.From(-100), Fix64.Zero);
+
+            bool hit = CCDSystem.SweptCircleCircle(a, b, Fix64.One, out Fix64 toi);
+
+            Assert.IsTrue(hit, "Overlapping, approaching balls must be detected.");
+            Assert.AreEqual(Fix64.Zero, toi, "TOI must be 0 for already-overlapping balls.");
+        }
+
+        /// <summary>
+        /// Overlapping balls that are already SEPARATING must not register a new collision.
+        /// </summary>
+        [Test]
+        public void SweptCircleCircle_OverlappingSeparatingBalls_ReturnsNoHit()
+        {
+            var a = new Ball(0);
+            var b = new Ball(1);
+
+            a.Position       = new FixVec2(Fix64.FromFloat(-0.5f), Fix64.Zero);
+            b.Position       = new FixVec2(Fix64.FromFloat( 0.5f), Fix64.Zero);
+            // Balls moving AWAY from each other.
+            a.LinearVelocity = new FixVec2(Fix64.From(-100), Fix64.Zero);
+            b.LinearVelocity = new FixVec2(Fix64.From( 100), Fix64.Zero);
+
+            bool hit = CCDSystem.SweptCircleCircle(a, b, Fix64.One, out Fix64 _);
+
+            Assert.IsFalse(hit, "Overlapping but separating balls must not be re-resolved.");
+        }
+
+        /// <summary>
+        /// Integration test: two balls colliding head-on at high speed must not end up
+        /// with their centres closer than the sum of their radii after a physics step.
+        /// </summary>
+        [Test]
+        public void Step_HeadOnBallBallCollision_NoPenetrationAfterStep()
+        {
+            var world = new PhysicsWorld2D();
+
+            var a = new Ball(0);
+            var b = new Ball(1);
+
+            // Place at moderate distance (not overlapping).
+            Fix64 gap = Ball.StandardRadius * Fix64.From(2) + Fix64.From(50);
+            a.Position       = new FixVec2(-gap / Fix64.From(2), Fix64.Zero);
+            b.Position       = new FixVec2( gap / Fix64.From(2), Fix64.Zero);
+            a.LinearVelocity = new FixVec2(Fix64.From(500), Fix64.Zero);
+            b.LinearVelocity = new FixVec2(Fix64.From(-500), Fix64.Zero);
+
+            world.AddBall(a);
+            world.AddBall(b);
+
+            // Simulate enough steps for the collision to resolve.
+            for (int i = 0; i < 10; i++)
+                world.Step();
+
+            Fix64 dist    = FixVec2.Distance(a.Position, b.Position);
+            Fix64 radSum  = a.Radius + b.Radius;
+            // Allow a small numerical tolerance.
+            Fix64 tolerance = Fix64.FromFloat(0.5f);
+            Assert.IsTrue(dist >= radSum - tolerance,
+                $"Balls must not penetrate: dist={dist.ToFloat():F3}, radSum={radSum.ToFloat():F3}");
+        }
+
+        // ── Bug 2: False rebounds from pocket rim segments ────────────────────────
+
+        /// <summary>
+        /// FindEarliestCollision must NOT return a hit for a pocket's rim segment.
+        /// Pockets are trigger volumes; their rim segments are not solid walls.
+        /// Before the fix: pocket rim was tested as a cushion → ball bounced.
+        /// After the fix: pocket rim block is removed → no rim collision returned.
+        /// </summary>
+        [Test]
+        public void FindEarliestCollision_BallInsidePocketArea_NoPocketRimCollision()
+        {
+            var pocket = MakePocket(0f, 0f, 100f);
+            // Give the pocket a rim segment that crosses the ball's path.
+            pocket.RimSegment = new Segment(
+                new FixVec2(Fix64.From(-200), Fix64.Zero),
+                new FixVec2(Fix64.From( 200), Fix64.Zero));
+
+            var ball = new Ball(0);
+            ball.Position       = new FixVec2(Fix64.From(-50), Fix64.Zero);
+            ball.LinearVelocity = new FixVec2(Fix64.From(100), Fix64.Zero);
+
+            var balls    = new List<Ball>    { ball };
+            var segments = new List<Segment>();
+            var pockets  = new List<Pocket>  { pocket };
+
+            CCDSystem.TOIResult result =
+                CCDSystem.FindEarliestCollision(balls, segments, pockets, Fix64.One);
+
+            Assert.IsFalse(result.Hit,
+                "Pocket rim must not register as a solid cushion collision.");
+        }
+
+        /// <summary>
+        /// Integration test: a ball moving toward a pocket (no table segments present)
+        /// must NOT receive a cushion bounce from the pocket rim.
+        /// </summary>
+        [Test]
+        public void Step_BallMovingIntoPocket_NoRimBounce()
+        {
+            var world = new PhysicsWorld2D();
+            var pocket = MakePocket(200f, 0f, 60f);
+            // Rim segment directly in the ball's path.
+            pocket.RimSegment = new Segment(
+                new FixVec2(Fix64.From(200), Fix64.From(-100)),
+                new FixVec2(Fix64.From(200), Fix64.From( 100)));
+            world.AddPocket(pocket);
+
+            var ball = new Ball(0);
+            ball.Position       = new FixVec2(Fix64.Zero, Fix64.Zero);
+            ball.LinearVelocity = new FixVec2(Fix64.From(1000), Fix64.Zero);
+            world.AddBall(ball);
+
+            Fix64 initialVelX = ball.LinearVelocity.X;
+
+            world.Step();
+
+            // Ball must have moved in the positive-X direction (no reversed velocity from rim).
+            // After one step at 1/60 s the ball is still travelling right (possibly pocketed).
+            bool notReversed = ball.IsPocketed || ball.LinearVelocity.X >= Fix64.Zero;
+            Assert.IsTrue(notReversed,
+                "Ball heading into a pocket must not bounce off the pocket rim.");
+        }
+
+        // ── Bug 3: Pocketing does not work ────────────────────────────────────────
+
+        /// <summary>
+        /// A motionless ball whose centre is inside the pocket radius must be flagged as
+        /// pocketed after a single Step().
+        /// Before the fix: CheckPocketCaptures was never called on the no-collision path
+        /// (the code called 'break' first), so the ball was never pocketed.
+        /// After the fix: CheckPocketCaptures is called before break, so the ball is
+        /// captured on the first step.
+        /// </summary>
+        [Test]
+        public void Step_BallAtPocketCenter_IsPocketedAfterOneStep()
+        {
+            var world = new PhysicsWorld2D();
+
+            var pocket = MakePocket(0f, 0f, 50f);
+            world.AddPocket(pocket);
+
+            var ball = new Ball(0);
+            ball.Position = new FixVec2(Fix64.Zero, Fix64.Zero);  // exactly at pocket center
+            world.AddBall(ball);
+
+            world.Step();
+
+            Assert.IsTrue(ball.IsPocketed, "Ball at pocket center must be pocketed after Step.");
+            Assert.AreEqual(FixVec2.Zero, ball.LinearVelocity,
+                "Pocketed ball must have zero linear velocity.");
+        }
+
+        /// <summary>
+        /// A fast-moving ball that reaches the pocket area during a step must be pocketed.
+        /// This exercises the case where the ball enters the pocket on the no-collision path.
+        /// </summary>
+        [Test]
+        public void Step_FastBallEnteringPocket_IsPocketedAfterSufficientSteps()
+        {
+            var world = new PhysicsWorld2D();
+
+            // Pocket at x=300, radius=60.
+            var pocket = MakePocket(300f, 0f, 60f);
+            world.AddPocket(pocket);
+
+            var ball = new Ball(0);
+            ball.Position       = new FixVec2(Fix64.Zero, Fix64.Zero);
+            ball.LinearVelocity = new FixVec2(Fix64.From(2000), Fix64.Zero);
+            world.AddBall(ball);
+
+            // Simulate until the ball should have crossed into the pocket.
+            bool pocketed = false;
+            for (int i = 0; i < 60 && !pocketed; i++)
+            {
+                world.Step();
+                pocketed = ball.IsPocketed;
+            }
+
+            Assert.IsTrue(pocketed,
+                "A ball directed into a pocket must be pocketed within 60 steps.");
+        }
+
+        // ── Bug 3 continued: velocity threshold was too low ───────────────────────
+
+        /// <summary>
+        /// A ball moving at typical billiard speed (much faster than the old
+        /// ReboundVelocityThreshold of 1 unit/s) that enters the pocket area must be
+        /// captured.  Under the old code the velocity check prevented capture entirely.
+        /// </summary>
+        [Test]
+        public void CheckPocketCaptures_FastBallInsidePocket_IsCaptured()
+        {
+            var world = new PhysicsWorld2D();
+
+            var pocket = MakePocket(0f, 0f, 50f);
+            world.AddPocket(pocket);
+
+            var ball = new Ball(0);
+            // Ball is already inside pocket area at high speed.
+            ball.Position       = new FixVec2(Fix64.Zero, Fix64.Zero);
+            ball.LinearVelocity = new FixVec2(Fix64.From(500), Fix64.Zero);
+            world.AddBall(ball);
+
+            world.Step();
+
+            Assert.IsTrue(ball.IsPocketed,
+                "A fast ball inside the pocket area must be captured regardless of speed.");
+        }
+
+        // ── No-false-bounce from table cushion ────────────────────────────────────
+
+        /// <summary>
+        /// A ball moving parallel to a distant cushion must not receive any bounce impulse.
+        /// </summary>
+        [Test]
+        public void SweptCircleSegment_BallFarFromCushion_NoHit()
+        {
+            var ball = new Ball(0);
+            ball.Position       = new FixVec2(Fix64.Zero, Fix64.Zero);
+            ball.LinearVelocity = new FixVec2(Fix64.From(100), Fix64.Zero);
+
+            // Cushion at x = 10000 — far beyond one step's travel distance.
+            Segment seg = MakeVerticalSegment(10000f, -500f, 500f);
+
+            bool hit = CCDSystem.SweptCircleSegment(ball, seg, Fix64.One, out Fix64 toi);
+
+            Assert.IsFalse(hit, "Ball far from cushion must not register a collision.");
+        }
+
+        /// <summary>
+        /// Integration test: a ball in open space (no cushions nearby) must not bounce
+        /// spontaneously.  Its velocity should decrease only due to rolling friction,
+        /// not reverse direction.
+        /// </summary>
+        [Test]
+        public void Step_BallInOpenSpace_NoSpontaneousBounce()
+        {
+            var world = new PhysicsWorld2D();
+            // One distant cushion so collision detection code exercises the segment path.
+            world.SetTableSegments(new[] { MakeVerticalSegment(10000f, -1000f, 1000f) });
+
+            var ball = new Ball(0);
+            ball.Position       = new FixVec2(Fix64.Zero, Fix64.Zero);
+            ball.LinearVelocity = new FixVec2(Fix64.From(200), Fix64.Zero);
+            world.AddBall(ball);
+
+            // Run several steps; ball should keep moving in +X (friction only).
+            for (int i = 0; i < 10; i++)
+                world.Step();
+
+            Assert.IsTrue(ball.LinearVelocity.X >= Fix64.Zero,
+                "Ball in open space must not spontaneously reverse direction.");
+        }
+    }
+}
