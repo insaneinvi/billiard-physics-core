@@ -158,9 +158,13 @@ namespace BilliardPhysics
             }
 
             // ── Test all polyline vertices (Start, every CP, End) as point circles ──
+            // Use index-based for loop instead of foreach to avoid enumerator boxing
+            // on the IReadOnlyList<FixVec2> interface, which would cause a GC alloc.
             Fix64 ballSpeed = ball.LinearVelocity.Magnitude;
-            foreach (FixVec2 pt in points)
+            int   pointCount = subSegCount + 1;   // points.Count, already known
+            for (int i = 0; i < pointCount; i++)
             {
+                FixVec2 pt = points[i];
                 // Broadphase: skip vertex if the ball cannot possibly reach it this step.
                 Fix64 ptDist = FixVec2.Distance(ball.Position, pt);
                 if (ptDist > ball.Radius + ballSpeed * dt + BroadphaseTolerance) continue;
