@@ -1,3 +1,5 @@
+using UnityEngine;
+
 namespace BilliardPhysics
 {
     public class Ball
@@ -6,10 +8,17 @@ namespace BilliardPhysics
         public int Id;
 
         // ── State ─────────────────────────────────────────────────────────────────
-        public FixVec2 Position;
-        public FixVec2 LinearVelocity;
-        public Fix64   AngularVelocity;
-        public bool    IsPocketed;
+        public FixVec2    Position;
+        public FixVec2    LinearVelocity;
+        public Fix64      AngularVelocity;
+        public bool       IsPocketed;
+
+        // ── Rendering ─────────────────────────────────────────────────────────────
+        /// <summary>
+        /// 3D orientation for rendering. Updated each simulation step by integrating
+        /// AngularVelocity (rad/s) around the +Z axis (Z-up, XY-plane motion).
+        /// </summary>
+        public Quaternion Rotation = Quaternion.identity;
 
         // ── Physical parameters ───────────────────────────────────────────────────
         public Fix64 Radius;
@@ -53,6 +62,7 @@ namespace BilliardPhysics
             LinearVelocity  = FixVec2.Zero;
             AngularVelocity = Fix64.Zero;
             IsPocketed      = false;
+            Rotation        = Quaternion.identity;
         }
     }
 }

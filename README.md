@@ -21,29 +21,46 @@ Assets/BilliardPhysics/
 ├── Runtime/
 │   ├── BilliardPhysics.Runtime.asmdef
 │   ├── Math/
-│   │   ├── Fix64.cs              # 32.32 有符号定点数
-│   │   └── FixVec2.cs            # 基于定点数的 2D 向量
+│   │   ├── Fix64.cs                      # 32.32 有符号定点数
+│   │   └── FixVec2.cs                    # 基于定点数的 2D 向量
 │   ├── Physics/
-│   │   ├── Ball.cs               # 球的状态与物理参数
-│   │   ├── Segment.cs            # 台边/库边线段
-│   │   ├── Pocket.cs             # 球袋
-│   │   ├── PhysicsWorld2D.cs     # 主仿真入口
-│   │   ├── CCDSystem.cs          # 连续碰撞检测
-│   │   ├── ImpulseResolver.cs    # 碰撞冲量解算
-│   │   ├── MotionSimulator.cs    # 摩擦力与运动积分
-│   │   └── CueStrike.cs          # 球杆击打
+│   │   ├── Ball.cs                       # 球的状态与物理参数
+│   │   ├── Segment.cs                    # 台边/库边折线段（支持 ConnectionPoints）
+│   │   ├── Pocket.cs                     # 球袋（含口沿线段 RimSegments）
+│   │   ├── PhysicsWorld2D.cs             # 主仿真入口
+│   │   ├── CCDSystem.cs                  # 连续碰撞检测
+│   │   ├── ImpulseResolver.cs            # 碰撞冲量解算
+│   │   ├── MotionSimulator.cs            # 摩擦力与运动积分
+│   │   └── CueStrike.cs                  # 球杆击打
 │   └── Table/
-│       ├── TableDefinition.cs    # 台面配置（ScriptableObject）
-│       └── PocketDefinition.cs   # 球袋配置（ScriptableObject）
-└── Editor/
-    ├── BilliardPhysics.Editor.asmdef
-    ├── TableEditorTool.cs        # 台面编辑器工具
-    └── PocketEditorTool.cs       # 球袋编辑器工具
+│       ├── TableDefinition.cs            # 台面配置（ScriptableObject，传统方式）
+│       ├── PocketDefinition.cs           # 球袋配置（ScriptableObject，传统方式）
+│       ├── TableAndPocketAuthoring.cs    # 台面与球袋 MonoBehaviour 编辑组件
+│       ├── TableAndPocketBinaryLoader.cs # 从二进制资产加载台面与球袋
+│       └── RimSegmentHelper.cs           # 口沿折线段端点升降辅助工具
+├── Editor/
+│   ├── BilliardPhysics.Editor.asmdef
+│   ├── TableEditorTool.cs                # 台面场景视图编辑器工具
+│   ├── PocketEditorTool.cs               # 球袋场景视图编辑器工具
+│   ├── TableAndPocketAuthoringEditor.cs  # TableAndPocketAuthoring 自定义 Inspector
+│   ├── ExportFixedBinaryHelper.cs        # 二进制导出纯逻辑辅助（可单元测试）
+│   └── ImportFixedBinaryHelper.cs        # 二进制导入纯逻辑辅助（可单元测试）
+└── Tests/
+    └── Editor/
+        ├── BilliardPhysics.Tests.Editor.asmdef
+        ├── ExportFixedBinaryHelperTests.cs
+        ├── ImportFixedBinaryHelperTests.cs
+        ├── RimFromCircleGeneratorTests.cs
+        ├── RimSegmentHelperTests.cs
+        ├── SegmentPolylineTests.cs
+        └── TableAndPocketBinaryLoaderTests.cs
 ```
 
 ## 快速上手
 
 ### 1. 创建仿真世界
+
+**方式 A：从 ScriptableObject 加载（传统方式）**
 
 ```csharp
 using BilliardPhysics;
@@ -55,8 +72,26 @@ var world = new PhysicsWorld2D();
 TableDefinition tableDef = ...; // 通过 Inspector 赋值或 Resources.Load
 world.SetTableSegments(tableDef.BuildSegments());
 
-// 添加球袋
-world.AddPocket(new Pocket(center, radius, reboundVelocityThreshold));
+// 从 PocketDefinition ScriptableObject 加载球袋
+PocketDefinition pocketDef = ...; // 通过 Inspector 赋值或 Resources.Load
+foreach (var pocket in pocketDef.BuildPockets())
+    world.AddPocket(pocket);
+```
+
+**方式 B：从二进制资产加载（推荐，运行时零 GC）**
+
+```csharp
+using BilliardPhysics;
+
+// 通过 Inspector 赋值或 Resources.Load 获取由编辑器导出的 .bytes 资产
+TextAsset binaryAsset = ...;
+
+var (tableSegments, pockets) = TableAndPocketBinaryLoader.Load(binaryAsset);
+
+var world = new PhysicsWorld2D();
+world.SetTableSegments(tableSegments);
+foreach (var pocket in pockets)
+    world.AddPocket(pocket);
 ```
 
 ### 2. 添加球
@@ -142,17 +177,34 @@ world.Reset();
 
 ## 台面配置
 
-在 Unity 编辑器中，通过菜单 **Assets → Create → BilliardPhysics → TableDefinition** 创建台面 ScriptableObject，在 Inspector 中添加台边线段（起点/终点坐标）。
+本库提供两套台面与球袋配置工作流，可按需选择：
 
-球袋同理通过 **PocketDefinition** ScriptableObject 配置。
+### 方式 A：ScriptableObject（传统）
+
+通过菜单 **Assets → Create → BilliardPhysics → TableDefinition** 创建台面 ScriptableObject，在 Inspector 中添加台边线段（起点 / 终点，以及可选的中间折点 ConnectionPoints）。
+
+球袋同理通过 **Assets → Create → BilliardPhysics → PocketDefinition** 创建。
 
 编辑器工具 `TableEditorTool` 和 `PocketEditorTool` 提供了场景视图内的可视化编辑功能。
+
+### 方式 B：MonoBehaviour + 二进制导出（推荐）
+
+1. 在场景中的任意 GameObject 上挂载 **TableAndPocketAuthoring** 组件（菜单路径：Component → BilliardPhysics → Table And Pocket Authoring）。
+2. 在 Inspector 中配置台边（`Table.Segments`，每段包含 Start、ConnectionPoints、End）和球袋（`Pockets`，包含中心、半径、反弹速度阈值，以及口沿折线段 `RimSegments`）。场景视图工具 `TableEditorTool` 和 `PocketEditorTool` 同样适用于此组件。
+3. 在 Inspector 底部点击 **Export Fixed Binary** 按钮，将台面与球袋数据序列化为 `.bytes` 二进制资产（调用 `ExportFixedBinaryHelper` 完成文件名校验与写入）。
+4. 运行时通过 `TableAndPocketBinaryLoader.Load(textAsset)` 一行代码加载，零额外 GC，支持热更新。
+
+如需将已有的 `.bytes` 资产重新导入回编辑器，点击 **Import Fixed Binary** 按钮，`ImportFixedBinaryHelper` 会将二进制数据还原为 `TableConfig` 和 `PocketConfig`，填充回组件的 Inspector 字段。
+
+> **口沿折线段（RimSegments）**：每个球袋可配置若干 `Segment`，描述球袋口的弧形边缘。折线通过 `ConnectionPoints` 逐段定义，`RimSegmentHelper` 提供了 `TryPromoteLastCPToEnd` / `TryPromoteFirstCPToStart` 两个辅助方法，用于在编辑器中安全地删减端点而不导致线段退化。
 
 ## 技术要点
 
 - **定点数运算**：`Fix64`（32.32 格式）保证仿真在不同平台、不同帧率下产生完全一致的结果，适用于联机对战等需要确定性的场景。
 - **CCD（连续碰撞检测）**：通过二次方程求解扫掠圆与圆、扫掠圆与线段的碰撞时刻（TOI），防止高速球穿透。
 - **冲量解算**：同时考虑线速度和角速度，支持库仑摩擦约束，模拟真实台球碰撞效果。
+- **折线段（Polyline Segment）**：`Segment` 支持在 Start 与 End 之间插入任意数量的 `ConnectionPoints`，从而用一个对象描述台边或球袋口的曲折形状，CCD 和冲量解算会对每个子段分别计算。
+- **二进制资产工作流**：台面与球袋数据可通过编辑器序列化为紧凑的定点数二进制格式（`.bytes`），运行时由 `TableAndPocketBinaryLoader` 直接解析，避免浮点转换误差，同时兼容版本 1（平坦子段）与版本 2（含 ConnectionPoints）两种格式。
 
 ## 环境要求
 
