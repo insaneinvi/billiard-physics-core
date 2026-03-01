@@ -72,8 +72,24 @@ namespace BilliardPhysics
         /// <summary>
         /// Resolves a ball-cushion collision using the outward normal of the
         /// struck sub-segment (or vertex), as determined by CCD detection.
+        /// Delegates to the overload with <paramref name="segmentRestitution"/> = 1
+        /// (backwards-compatible; behaves identically to the original method).
         /// </summary>
         public static void ResolveBallCushion(Ball ball, FixVec2 hitNormal)
+            => ResolveBallCushion(ball, hitNormal, Fix64.One);
+
+        /// <summary>
+        /// Resolves a ball-cushion collision, blending the ball's own restitution
+        /// with the cushion segment's <paramref name="segmentRestitution"/>.
+        /// The effective restitution is <c>Min(ball.Restitution, segmentRestitution)</c>.
+        /// </summary>
+        /// <param name="ball">The ball that struck the cushion.</param>
+        /// <param name="hitNormal">Outward normal of the struck sub-segment or vertex.</param>
+        /// <param name="segmentRestitution">
+        /// Restitution of the struck <see cref="Segment"/> (0–1).
+        /// Use <see cref="Segment.Restitution"/> from the TOI result.
+        /// </param>
+        public static void ResolveBallCushion(Ball ball, FixVec2 hitNormal, Fix64 segmentRestitution)
         {
             FixVec2 n = hitNormal;
 
@@ -90,7 +106,9 @@ namespace BilliardPhysics
             Fix64   v_rel_n   = FixVec2.Dot(v_contact, n);
             if (v_rel_n >= Fix64.Zero) return;
 
-            Fix64 e          = ball.Restitution;
+            // Effective restitution: take the minimum of ball and cushion values so that
+            // setting either to 0 yields a fully inelastic normal response.
+            Fix64 e          = Fix64.Min(ball.Restitution, segmentRestitution);
             Fix64 rPerpDotN  = FixVec2.Dot(rPerp, n);
             Fix64 denomN     = Fix64.One / ball.Mass + rPerpDotN * rPerpDotN / ball.Inertia;
             Fix64 jn         = -(Fix64.One + e) * v_rel_n / denomN;
