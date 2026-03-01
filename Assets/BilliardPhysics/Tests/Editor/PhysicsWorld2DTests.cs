@@ -476,6 +476,53 @@ namespace BilliardPhysics.Tests
                 "Side-spin must have decayed after 30 steps.");
         }
 
+        // ── Friction-driven spin direction (τ = r × F) ───────────────────────────
+
+        /// <summary>
+        /// A ball given an initial velocity in the +X direction with zero angular velocity
+        /// must, after several friction steps:
+        ///   1. Have its linear speed reduced (sliding friction decelerates the ball).
+        ///   2. Develop a non-zero ω.Y (table friction torques the ball around the Y axis).
+        ///   3. Have ω.Y negative, which is the sign predicted by τ = r × F in the code's
+        ///      Z-down coordinate convention:
+        ///        r = (0, 0, +R)              [contact point; +Z points toward the table]
+        ///        F = (−F_mag, 0, 0)          [friction opposes +X motion]
+        ///        τ = r × F = (0, −R·F_mag, 0)  →  τ.Y is negative  →  ω.Y must become negative
+        ///      Equivalently, in the right-hand Z-up convention the contact point is
+        ///      r = (0, 0, −R) and τ = r × F = (0, +R·F_mag, 0), but the Y axis is
+        ///      shared between both conventions so the physical rotation is the same.
+        /// </summary>
+        [Test]
+        public void Step_FrictionDrivesSpin_OmegaYSignConsistentWithTorque()
+        {
+            var ball = new Ball(0);
+            ball.Position       = FixVec2.Zero;
+            ball.LinearVelocity = new FixVec2(Fix64.From(300), Fix64.Zero);
+            // AngularVelocity starts at zero (default).
+
+            Fix64 initialSpeedX = ball.LinearVelocity.X;
+            var   dt            = Fix64.One / Fix64.From(60);
+
+            // Run several steps so sliding friction can build up angular velocity.
+            for (int i = 0; i < 30; i++)
+                MotionSimulator.Step(ball, dt);
+
+            // 1. Linear velocity must have decreased.
+            Assert.IsTrue(ball.LinearVelocity.X < initialSpeedX,
+                $"Friction must decelerate the ball; " +
+                $"initial Lv.X={initialSpeedX.ToFloat():F1}, " +
+                $"after Lv.X={ball.LinearVelocity.X.ToFloat():F3}");
+
+            // 2. ω.Y must be non-zero.
+            Assert.AreNotEqual(Fix64.Zero, ball.AngularVelocity.Y,
+                "Sliding friction must produce non-zero ω.Y for a ball sliding in +X.");
+
+            // 3. ω.Y must be NEGATIVE: τ.Y = r.Z * F.X = R * (−F_mag) < 0.
+            Assert.IsTrue(ball.AngularVelocity.Y < Fix64.Zero,
+                $"ω.Y must be negative for +X motion per τ = r × F in Z-down convention; " +
+                $"got ω.Y = {ball.AngularVelocity.Y.ToFloat():F4}");
+        }
+
         // ── TableFriction: linear-velocity decay and ω.Y coupling ─────────────────
 
         /// <summary>
