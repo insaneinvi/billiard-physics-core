@@ -9,8 +9,8 @@ namespace BilliardPhysics
         public FixVec2    Position;
         public FixVec2    LinearVelocity;
         /// <summary>
-        /// 3D angular velocity (rad/s) in the physics coordinate system (Z-down:
-        /// +Z points toward the table; table normal = (0,0,-1)).
+        /// 3D angular velocity (rad/s) in the physics coordinate system (Z-up:
+        /// +Z points away from the table; table normal = (0,0,+1)).
         /// X/Y components drive rolling (coupled to linear motion via table friction).
         /// Z component is side-spin (english); decays via SpinFriction.
         /// </summary>
