@@ -2,6 +2,23 @@ namespace BilliardPhysics
 {
     public static class ImpulseResolver
     {
+        // ── Positional-correction parameters ─────────────────────────────────────
+
+        /// <summary>
+        /// Minimum penetration depth (in physics units) that triggers positional
+        /// correction.  Overlaps smaller than this value are ignored to avoid
+        /// jitter from fixed-point rounding.
+        /// Ball radius is ~28.6 units, so 0.1 units ≈ 0.35 % of R.
+        /// </summary>
+        public static Fix64 PenetrationSlop = Fix64.FromFloat(0.1f);
+
+        /// <summary>
+        /// Fraction of the excess penetration (beyond <see cref="PenetrationSlop"/>)
+        /// that is corrected per resolution call.  Values near 1 give fast correction
+        /// but may introduce visible position pops; 0.8 is a stable default.
+        /// </summary>
+        public static Fix64 CorrectionPercent = Fix64.From(8) / Fix64.From(10);  // 0.8
+
         // ── Ball–ball collision ───────────────────────────────────────────────────
 
         public static void ResolveBallBall(Ball a, Ball b)
@@ -67,6 +84,24 @@ namespace BilliardPhysics
             b.LinearVelocity    -= tangent *  (jt / b.Mass);
             a.AngularVelocity.Z += raPerpDotT * jt / a.Inertia;
             b.AngularVelocity.Z -= rbPerpDotT * jt / b.Inertia;
+
+            // ── Positional correction (linear projection) ─────────────────────────
+            // Prevent persistent interpenetration by directly nudging ball centres
+            // apart when overlap exceeds PenetrationSlop.  Correction is split
+            // proportionally by inverse mass so that lighter balls move more.
+            Fix64 dist        = FixVec2.Distance(a.Position, b.Position);
+            Fix64 penetration = a.Radius + b.Radius - dist;
+
+            if (penetration > PenetrationSlop)
+            {
+                Fix64   invMassA   = Fix64.One / a.Mass;
+                Fix64   invMassB   = Fix64.One / b.Mass;
+                Fix64   totalInv   = invMassA + invMassB;
+                Fix64   corrMag    = (penetration - PenetrationSlop) * CorrectionPercent / totalInv;
+                FixVec2 correction = n * corrMag;
+                a.Position -= correction * invMassA;
+                b.Position += correction * invMassB;
+            }
         }
 
         // ── Ball–cushion collision ────────────────────────────────────────────────

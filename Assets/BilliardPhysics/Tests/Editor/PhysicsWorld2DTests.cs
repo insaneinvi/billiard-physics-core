@@ -926,5 +926,142 @@ namespace BilliardPhysics.Tests
                 $"Top-spin must reduce initial slip vs no-spin; " +
                 $"no-spin={slipNoSpin.ToFloat():F3}, top-spin={slipTopSpin.ToFloat():F3}");
         }
+
+        // ── Positional correction: persistent interpenetration fix ────────────────
+
+        /// <summary>
+        /// Minimum reproduction test (fails before positional-correction fix,
+        /// passes after):
+        /// Two balls that are already overlapping and approaching must have their
+        /// positions corrected by <see cref="ImpulseResolver.ResolveBallBall"/> so
+        /// that the distance after the call is meaningfully closer to the combined
+        /// radii than it was before.
+        ///
+        /// Without positional correction the resolver only changes velocities;
+        /// positions remain at the overlapping values, so the assertion fails.
+        /// With the linear-projection correction the excess overlap is reduced by
+        /// <see cref="ImpulseResolver.CorrectionPercent"/> × (overlap − slop) and
+        /// the assertion passes.
+        ///
+        /// Parameter notes:
+        ///   PenetrationSlop     = 0.1 physics-units  (≈ 0.35 % of ball radius)
+        ///   CorrectionPercent   = 0.8  (80 % of excess overlap resolved per call)
+        ///   Tolerance below     = 2.0 physics-units  (covers the remaining 20 %)
+        /// </summary>
+        [Test]
+        public void ResolveBallBall_OverlappingApproachingBalls_PositionsCorrectedAfterResolution()
+        {
+            var a = new Ball(0);
+            var b = new Ball(1);
+
+            // Place balls with a 3-unit overlap (dist = radSum − 3).
+            // Combined radius = 2 × 28.575 ≈ 57.15 units.
+            Fix64 radSum  = a.Radius + b.Radius;
+            Fix64 overlap = Fix64.From(3);
+            Fix64 half    = (radSum - overlap) / Fix64.From(2);
+            a.Position = new FixVec2(-half, Fix64.Zero);
+            b.Position = new FixVec2( half, Fix64.Zero);
+
+            // Give them approaching velocities so the impulse path is taken.
+            a.LinearVelocity = new FixVec2(Fix64.From(10), Fix64.Zero);
+            b.LinearVelocity = new FixVec2(Fix64.From(-10), Fix64.Zero);
+
+            Fix64 distBefore = FixVec2.Distance(a.Position, b.Position);
+
+            ImpulseResolver.ResolveBallBall(a, b);
+
+            Fix64 distAfter = FixVec2.Distance(a.Position, b.Position);
+
+            // Without positional correction: distAfter == distBefore (no position change).
+            // With    positional correction: distAfter ≈ radSum − 0.68 (80 % of excess resolved).
+            // Tolerance of 2 units accounts for the remaining 20 % corrected by velocity.
+            Fix64 tolerance = Fix64.From(2);
+            Assert.IsTrue(distAfter >= radSum - tolerance,
+                $"ResolveBallBall must correct overlapping positions: " +
+                $"before={distBefore.ToFloat():F3}, after={distAfter.ToFloat():F3}, " +
+                $"radSum={radSum.ToFloat():F3}");
+        }
+
+        /// <summary>
+        /// Regression test: two balls placed with a moderate overlap inside the
+        /// physics world must fully separate within a small number of simulation
+        /// steps.  Without positional correction the balls remain stuck overlapping
+        /// because the impulse alone (with small velocities) produces insufficient
+        /// separation within the fixed 1/60 s time-step.
+        /// </summary>
+        [Test]
+        public void Step_OverlappingBalls_SeparateAfterPhysicsStep()
+        {
+            var world = new PhysicsWorld2D();
+
+            var a = new Ball(0);
+            var b = new Ball(1);
+
+            // 3-unit overlap; small approaching velocities so CCD returns toi = 0.
+            Fix64 radSum  = a.Radius + b.Radius;
+            Fix64 overlap = Fix64.From(3);
+            Fix64 half    = (radSum - overlap) / Fix64.From(2);
+            a.Position = new FixVec2(-half, Fix64.Zero);
+            b.Position = new FixVec2( half, Fix64.Zero);
+            a.LinearVelocity = new FixVec2(Fix64.From(5), Fix64.Zero);
+            b.LinearVelocity = new FixVec2(Fix64.From(-5), Fix64.Zero);
+
+            world.AddBall(a);
+            world.AddBall(b);
+
+            for (int i = 0; i < 5; i++)
+                world.Step();
+
+            Fix64 dist      = FixVec2.Distance(a.Position, b.Position);
+            Fix64 tolerance = Fix64.FromFloat(0.5f);
+            Assert.IsTrue(dist >= radSum - tolerance,
+                $"Overlapping balls must separate within 5 steps: " +
+                $"dist={dist.ToFloat():F3}, radSum={radSum.ToFloat():F3}");
+        }
+
+        /// <summary>
+        /// Regression test for a three-ball chain collision: ball A strikes stationary
+        /// balls B and C that are touching.  After several steps no pair of balls may
+        /// remain in persistent overlap.  Validates that positional correction handles
+        /// the simultaneous/sequential multi-ball case without long-term penetration.
+        /// </summary>
+        [Test]
+        public void Step_ThreeBallChainCollision_NoPersistentOverlapAfterCollision()
+        {
+            var world = new PhysicsWorld2D();
+
+            var a = new Ball(0);
+            var b = new Ball(1);
+            var c = new Ball(2);
+
+            Fix64 radSum = a.Radius + b.Radius;  // equal radii, so = 2 × radius
+
+            // A approaches from the left; B and C are at rest, touching each other.
+            a.Position = new FixVec2(-(radSum * Fix64.From(3)), Fix64.Zero);
+            b.Position = new FixVec2(Fix64.Zero, Fix64.Zero);
+            c.Position = new FixVec2(radSum, Fix64.Zero);   // exactly touching b
+
+            a.LinearVelocity = new FixVec2(Fix64.From(500), Fix64.Zero);
+
+            world.AddBall(a);
+            world.AddBall(b);
+            world.AddBall(c);
+
+            for (int i = 0; i < 10; i++)
+                world.Step();
+
+            Fix64 tolerance = Fix64.FromFloat(0.5f);
+
+            Fix64 distAB = FixVec2.Distance(a.Position, b.Position);
+            Fix64 distBC = FixVec2.Distance(b.Position, c.Position);
+            Fix64 distAC = FixVec2.Distance(a.Position, c.Position);
+
+            Assert.IsTrue(distAB >= radSum - tolerance,
+                $"A-B must not persistently overlap: dist={distAB.ToFloat():F3}, radSum={radSum.ToFloat():F3}");
+            Assert.IsTrue(distBC >= radSum - tolerance,
+                $"B-C must not persistently overlap: dist={distBC.ToFloat():F3}, radSum={radSum.ToFloat():F3}");
+            Assert.IsTrue(distAC >= radSum - tolerance,
+                $"A-C must not persistently overlap: dist={distAC.ToFloat():F3}, radSum={radSum.ToFloat():F3}");
+        }
     }
 }

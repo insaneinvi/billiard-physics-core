@@ -175,6 +175,16 @@ world.Reset();
 | `CaptureRadiusFactor` | 0.5 | 球袋捕获半径系数 |
 | `CollisionEpsilon` | 1e-5 s | 碰撞后时间安全偏移量 |
 
+### ImpulseResolver（球-球位置修正参数）
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `PenetrationSlop` | 0.1 物理单位 | 触发位置修正的最小穿透深度（≈ 球半径的 0.35%）。小于此值的重叠由定点数舍入误差引起，忽略以避免抖动。 |
+| `CorrectionPercent` | 0.8 | 每次碰撞求解调用时修正的超量穿透比例（80%）。剩余 20% 由速度分离自然消除，避免位置突变。 |
+
+> **说明**：`PenetrationSlop` 与 `CorrectionPercent` 是 `static` 字段，可在运行时按需调整。  
+> 若出现抖动，可适当减小 `CorrectionPercent`（如 0.5）；若重叠消除过慢，可适当增大。
+
 ## 台面配置
 
 本库提供两套台面与球袋配置工作流，可按需选择：
