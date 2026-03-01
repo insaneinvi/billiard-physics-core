@@ -16,7 +16,7 @@ namespace BilliardPhysics
         /// <para/>
         /// Simplified model: the table friction is treated as an isotropic Coulomb
         /// friction coefficient on top of per-ball values.  During pure rolling the
-        /// rolling constraint <c>ω.Y = −Lv.X / R</c> automatically couples any extra
+        /// rolling constraint <c>ω.Y = +Lv.X / R</c> automatically couples any extra
         /// linear deceleration into a matching change of Y-axis angular velocity.
         /// <para/>
         /// Default = 0 (no extra friction, preserves existing per-ball behaviour).
