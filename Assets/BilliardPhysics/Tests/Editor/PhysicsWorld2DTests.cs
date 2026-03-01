@@ -406,8 +406,8 @@ namespace BilliardPhysics.Tests
                 "Table friction must develop ω.Y for a ball sliding in +X.");
 
             // Contact-point slip must be significantly reduced from the initial value (300).
-            Fix64 vtX = ball.LinearVelocity.X + ball.AngularVelocity.Y * ball.Radius;
-            Fix64 vtY = ball.LinearVelocity.Y - ball.AngularVelocity.X * ball.Radius;
+            Fix64 vtX = ball.LinearVelocity.X - ball.AngularVelocity.Y * ball.Radius;
+            Fix64 vtY = ball.LinearVelocity.Y + ball.AngularVelocity.X * ball.Radius;
             Fix64 slip = Fix64.Sqrt(vtX * vtX + vtY * vtY);
             Assert.IsTrue(slip < Fix64.From(300),
                 $"Contact-point slip must decrease; actual={slip.ToFloat():F3}");
@@ -423,8 +423,8 @@ namespace BilliardPhysics.Tests
             var ball = new Ball(0);
             ball.Position       = FixVec2.Zero;
             ball.LinearVelocity = FixVec2.Zero;
-            // Inject top-spin: ω.Y < 0 drives +X motion when ball contacts the table.
-            ball.AngularVelocity = new FixVec3(Fix64.Zero, Fix64.From(-10), Fix64.Zero);
+            // Inject top-spin: ω.Y > 0 drives +X motion when ball contacts the table (Z-up).
+            ball.AngularVelocity = new FixVec3(Fix64.Zero, Fix64.From(10), Fix64.Zero);
 
             var dt = Fix64.One / Fix64.From(60);
 
@@ -550,7 +550,7 @@ namespace BilliardPhysics.Tests
                 "Ball with table friction must develop ω.Y.");
 
             // The magnitude of ω.Y for ballExtra must be >= ballNoExtra:
-            // both approach the rolling condition ω.Y = -Lv.X / R, but ballExtra reaches
+            // both approach the rolling condition ω.Y = +Lv.X / R, but ballExtra reaches
             // it from a lower Lv.X (it decelerates faster), so its final |ω.Y| is smaller.
             // What we assert is that both develop non-zero ω.Y, and that their final
             // speeds differ due to the extra friction.
