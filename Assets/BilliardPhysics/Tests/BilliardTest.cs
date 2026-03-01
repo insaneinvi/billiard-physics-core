@@ -106,11 +106,12 @@ public class BilliardTest : MonoBehaviour
             var ballObj = ballDict[ball.Id];
             var ballShadowObj = ballShadowDict[ball.Id];
 
-            // Convert physics ω (Z-down) to Unity space (Z-up) and integrate rotation.
+            // Pass raw physics ω to IntegrateRotation; it applies the correct
+            // axial-vector transform (physics Z-up → view Z-negated) internally.
             var omega = ball.AngularVelocity;
-            var omegaUnity = new Vector3(omega.X.ToFloat(), omega.Y.ToFloat(), -omega.Z.ToFloat());
+            var physicsOmega = new Vector3(omega.X.ToFloat(), omega.Y.ToFloat(), omega.Z.ToFloat());
             _ballRotations[ball.Id] = PhysicsToView.IntegrateRotation(
-                _ballRotations[ball.Id], omegaUnity, Time.fixedDeltaTime);
+                _ballRotations[ball.Id], physicsOmega, Time.fixedDeltaTime);
 
             ballObj.transform.position = new Vector3(ball.Position.X.ToFloat(), ball.Position.Y.ToFloat(), -BallRackHelper.HalfBallDiameter);
             ballObj.transform.rotation = _ballRotations[ball.Id];
