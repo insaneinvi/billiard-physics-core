@@ -385,7 +385,7 @@ namespace BilliardPhysics.Tests
         /// <summary>
         /// Scene 1: A ball given a linear velocity with zero spin must develop
         /// XY angular velocity through table friction, indicating rolling onset.
-        /// ω.Y must become non-zero, and ball.Rotation must change from identity.
+        /// ω.Y must become non-zero.
         /// </summary>
         [Test]
         public void Step_SlidingBallZeroSpin_DevelopsRollingOmegaXY()
@@ -411,11 +411,6 @@ namespace BilliardPhysics.Tests
             Fix64 slip = Fix64.Sqrt(vtX * vtX + vtY * vtY);
             Assert.IsTrue(slip < Fix64.From(300),
                 $"Contact-point slip must decrease; actual={slip.ToFloat():F3}");
-
-            // Rotation must have a non-trivial Y component (axis is not pure Z):
-            // after 100 steps with growing ω.Y, accumulated angle ≈ 12 degrees → |y| ≈ 0.1.
-            Assert.AreNotEqual(0f, ball.Rotation.y, 0.01f,
-                "Ball rotation must have Y component (non-Z axis) after sliding friction steps.");
         }
 
         /// <summary>
