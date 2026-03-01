@@ -692,5 +692,239 @@ namespace BilliardPhysics.Tests
                 $"Post-bounce speed must be lower than pre-bounce speed: " +
                 $"before={speedBefore.ToFloat():F1}, after={speedAfter.ToFloat():F1}");
         }
+
+        // ── Rolling-constraint verification ───────────────────────────────────────
+        // Constraint (Z-up frame): v_contact = v + ω × r = 0
+        //   r = (0, 0, −R),  ω × r = (−ω.Y·R, +ω.X·R, 0)
+        //   slip_x = v.X − ω.Y·R,  slip_y = v.Y + ω.X·R
+        // In rolling: |slip| < Epsilon,  |v.X| / (R·|ω.Y|) ≈ 1 (for +X motion).
+
+        /// <summary>
+        /// Helper: advances the ball until slip drops below Epsilon or maxSteps is reached.
+        /// </summary>
+        private static bool AdvanceToRolling(Ball ball, int maxSteps, Fix64 dt,
+            out int stepsToRolling)
+        {
+            Fix64 eps = Fix64.One / Fix64.From(1000);
+            for (int i = 0; i < maxSteps; i++)
+            {
+                MotionSimulator.Step(ball, dt);
+                Fix64 vtX  = ball.LinearVelocity.X - ball.AngularVelocity.Y * ball.Radius;
+                Fix64 vtY  = ball.LinearVelocity.Y + ball.AngularVelocity.X * ball.Radius;
+                Fix64 slip = Fix64.Sqrt(vtX * vtX + vtY * vtY);
+                if (slip < eps)
+                {
+                    stepsToRolling = i + 1;
+                    return true;
+                }
+            }
+            stepsToRolling = maxSteps;
+            return false;
+        }
+
+        /// <summary>
+        /// Ball rolling in +X: after entering rolling, slip must stay near zero
+        /// for at least 60 subsequent steps (no systematic drift).
+        /// </summary>
+        [Test]
+        public void RollingConstraint_PlusX_SlipRemainsNearZeroAfterTransition()
+        {
+            var ball = new Ball(0);
+            ball.Position       = FixVec2.Zero;
+            ball.LinearVelocity = new FixVec2(Fix64.From(300), Fix64.Zero);
+
+            var dt = Fix64.One / Fix64.From(60);
+            bool reached = AdvanceToRolling(ball, 6000, dt, out _);
+            Assert.IsTrue(reached, "Ball sliding in +X must eventually enter rolling.");
+
+            if (ball.IsMotionless) return;
+
+            Fix64 eps = Fix64.From(5) / Fix64.From(1000);  // 5× Epsilon tolerance
+            for (int i = 0; i < 60; i++)
+            {
+                MotionSimulator.Step(ball, dt);
+                if (ball.IsMotionless) break;
+
+                Fix64 vtX  = ball.LinearVelocity.X - ball.AngularVelocity.Y * ball.Radius;
+                Fix64 vtY  = ball.LinearVelocity.Y + ball.AngularVelocity.X * ball.Radius;
+                Fix64 slip = Fix64.Sqrt(vtX * vtX + vtY * vtY);
+                Assert.IsTrue(slip < eps,
+                    $"+X rolling: slip must stay near zero at post-rolling step {i}; " +
+                    $"slip={slip.ToFloat():F6}");
+            }
+        }
+
+        /// <summary>
+        /// Ball rolling in +Y: after entering rolling, slip must stay near zero.
+        /// </summary>
+        [Test]
+        public void RollingConstraint_PlusY_SlipRemainsNearZeroAfterTransition()
+        {
+            var ball = new Ball(0);
+            ball.Position       = FixVec2.Zero;
+            ball.LinearVelocity = new FixVec2(Fix64.Zero, Fix64.From(300));
+
+            var dt = Fix64.One / Fix64.From(60);
+            bool reached = AdvanceToRolling(ball, 6000, dt, out _);
+            Assert.IsTrue(reached, "Ball sliding in +Y must eventually enter rolling.");
+
+            if (ball.IsMotionless) return;
+
+            Fix64 eps = Fix64.From(5) / Fix64.From(1000);
+            for (int i = 0; i < 60; i++)
+            {
+                MotionSimulator.Step(ball, dt);
+                if (ball.IsMotionless) break;
+
+                Fix64 vtX  = ball.LinearVelocity.X - ball.AngularVelocity.Y * ball.Radius;
+                Fix64 vtY  = ball.LinearVelocity.Y + ball.AngularVelocity.X * ball.Radius;
+                Fix64 slip = Fix64.Sqrt(vtX * vtX + vtY * vtY);
+                Assert.IsTrue(slip < eps,
+                    $"+Y rolling: slip must stay near zero at post-rolling step {i}; " +
+                    $"slip={slip.ToFloat():F6}");
+            }
+        }
+
+        /// <summary>
+        /// Ball rolling diagonally (+X and +Y): after entering rolling, slip stays near zero.
+        /// </summary>
+        [Test]
+        public void RollingConstraint_Diagonal_SlipRemainsNearZeroAfterTransition()
+        {
+            var ball = new Ball(0);
+            ball.Position = FixVec2.Zero;
+            // Diagonal initial velocity: speed 300 at 45 degrees.
+            Fix64 comp = Fix64.FromFloat(300f / 1.41421356f);
+            ball.LinearVelocity = new FixVec2(comp, comp);
+
+            var dt = Fix64.One / Fix64.From(60);
+            bool reached = AdvanceToRolling(ball, 6000, dt, out _);
+            Assert.IsTrue(reached, "Ball sliding diagonally must eventually enter rolling.");
+
+            if (ball.IsMotionless) return;
+
+            Fix64 eps = Fix64.From(5) / Fix64.From(1000);
+            for (int i = 0; i < 60; i++)
+            {
+                MotionSimulator.Step(ball, dt);
+                if (ball.IsMotionless) break;
+
+                Fix64 vtX  = ball.LinearVelocity.X - ball.AngularVelocity.Y * ball.Radius;
+                Fix64 vtY  = ball.LinearVelocity.Y + ball.AngularVelocity.X * ball.Radius;
+                Fix64 slip = Fix64.Sqrt(vtX * vtX + vtY * vtY);
+                Assert.IsTrue(slip < eps,
+                    $"Diagonal rolling: slip must stay near zero at post-rolling step {i}; " +
+                    $"slip={slip.ToFloat():F6}");
+            }
+        }
+
+        /// <summary>
+        /// |v.X| / (R·|ω.Y|) must converge from non-1 toward 1 and stay there.
+        /// Before entering rolling the ratio is != 1 (zero ω.Y); after rolling it must be ≈ 1.
+        /// </summary>
+        [Test]
+        public void RollingConstraint_PlusX_VelocityToSpinRatioConvergesToOne()
+        {
+            var ball = new Ball(0);
+            ball.Position       = FixVec2.Zero;
+            ball.LinearVelocity = new FixVec2(Fix64.From(300), Fix64.Zero);
+
+            var dt = Fix64.One / Fix64.From(60);
+
+            Assert.AreEqual(Fix64.Zero, ball.AngularVelocity.Y,
+                "Initial ω.Y must be zero (no spin at launch).");
+
+            bool reached = AdvanceToRolling(ball, 6000, dt, out _);
+            Assert.IsTrue(reached, "Ball must reach rolling state.");
+
+            if (ball.IsMotionless) return;
+
+            // For 60 steps in rolling: |v.X| / (R·|ω.Y|) must be within 2% of 1.
+            Fix64 tolAbs = Fix64.From(2) / Fix64.From(100);
+            for (int i = 0; i < 60; i++)
+            {
+                MotionSimulator.Step(ball, dt);
+                if (ball.IsMotionless) break;
+
+                Fix64 vX  = Fix64.Abs(ball.LinearVelocity.X);
+                Fix64 omY = Fix64.Abs(ball.AngularVelocity.Y);
+                if (vX < Fix64.From(1) || omY < Fix64.One / Fix64.From(1000)) break;
+
+                Fix64 ratio = vX / (ball.Radius * omY);
+                Fix64 err   = Fix64.Abs(ratio - Fix64.One);
+                Assert.IsTrue(err < tolAbs,
+                    $"v/Rω ratio must be ≈1 in rolling (step {i}); " +
+                    $"ratio={ratio.ToFloat():F4}, err={err.ToFloat():F4}");
+            }
+        }
+
+        // ── CueStrike spin convention (Z-up) ──────────────────────────────────────
+
+        /// <summary>
+        /// CueStrike with top-spin (spinY > 0) striking in +X must produce ω.Y > 0
+        /// (Z-up convention: positive ω.Y is the rolling direction for +X motion).
+        /// Bug (pre-fix): Z-down convention gave ω.Y &lt; 0, increasing initial slip.
+        /// </summary>
+        [Test]
+        public void CueStrike_TopSpinPlusX_OmegaYIsPositive()
+        {
+            var ball      = new Ball(0);
+            FixVec2 dir   = new FixVec2(Fix64.One, Fix64.Zero);
+            Fix64 strength = Fix64.From(10000);
+            Fix64 spinY    = Fix64.One;
+
+            CueStrike.Apply(ball, dir, strength, Fix64.Zero, spinY);
+
+            Assert.IsTrue(ball.AngularVelocity.Y > Fix64.Zero,
+                "Top-spin cue strike in +X must produce ω.Y > 0 (Z-up convention).");
+        }
+
+        /// <summary>
+        /// CueStrike with back-spin (spinY &lt; 0) striking in +X must produce ω.Y &lt; 0.
+        /// </summary>
+        [Test]
+        public void CueStrike_BackSpinPlusX_OmegaYIsNegative()
+        {
+            var ball      = new Ball(0);
+            FixVec2 dir   = new FixVec2(Fix64.One, Fix64.Zero);
+            Fix64 strength = Fix64.From(10000);
+            Fix64 spinY    = -Fix64.One;
+
+            CueStrike.Apply(ball, dir, strength, Fix64.Zero, spinY);
+
+            Assert.IsTrue(ball.AngularVelocity.Y < Fix64.Zero,
+                "Back-spin cue strike in +X must produce ω.Y < 0 (Z-up convention).");
+        }
+
+        /// <summary>
+        /// CueStrike top-spin must REDUCE initial contact-point slip compared to no-spin.
+        /// In Z-up convention, top-spin gives ω.Y > 0 (toward rolling direction),
+        /// so initial slip = |v.X - ω.Y·R| is smaller than the no-spin slip = |v.X|.
+        /// Bug (pre-fix): ω.Y &lt; 0 (Z-down) INCREASED slip instead of reducing it.
+        /// </summary>
+        [Test]
+        public void CueStrike_TopSpinPlusX_SlipLessThanNoSpinStrike()
+        {
+            Fix64 strength = Fix64.From(50000);
+            FixVec2 dir    = new FixVec2(Fix64.One, Fix64.Zero);
+
+            var ballNoSpin = new Ball(0);
+            CueStrike.Apply(ballNoSpin, dir, strength, Fix64.Zero, Fix64.Zero);
+
+            var ballTopSpin = new Ball(1);
+            Fix64 spinY = Ball.StandardRadius / Fix64.From(2);
+            CueStrike.Apply(ballTopSpin, dir, strength, Fix64.Zero, spinY);
+
+            Fix64 slipNoSpin = Fix64.Abs(
+                ballNoSpin.LinearVelocity.X
+                - ballNoSpin.AngularVelocity.Y * ballNoSpin.Radius);
+            Fix64 slipTopSpin = Fix64.Abs(
+                ballTopSpin.LinearVelocity.X
+                - ballTopSpin.AngularVelocity.Y * ballTopSpin.Radius);
+
+            Assert.IsTrue(slipTopSpin < slipNoSpin,
+                $"Top-spin must reduce initial slip vs no-spin; " +
+                $"no-spin={slipNoSpin.ToFloat():F3}, top-spin={slipTopSpin.ToFloat():F3}");
+        }
     }
 }

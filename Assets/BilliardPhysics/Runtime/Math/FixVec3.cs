@@ -2,8 +2,8 @@ namespace BilliardPhysics
 {
     /// <summary>
     /// 3-component fixed-point vector using Fix64 components.
-    /// Coordinate convention: Z-down (table surface normal is n = (0,0,-1)).
-    /// Ball center-to-contact-point vector: r = (0,0,+Radius)).
+    /// Coordinate convention: Z-up (table surface normal is n = (0,0,+1)).
+    /// Ball center-to-contact-point vector: r = (0,0,−Radius).
     /// </summary>
     public struct FixVec3
     {

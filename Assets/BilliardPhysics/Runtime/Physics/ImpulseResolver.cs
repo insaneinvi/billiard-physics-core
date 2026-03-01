@@ -16,7 +16,9 @@ namespace BilliardPhysics
             FixVec2 rb = -n * b.Radius;
 
             // Velocity at contact point (linear + angular contribution).
-            // In Z-down frame, ω × r for an in-plane r reduces to ω.Z * r.Perp().
+            // ω × r for an in-plane r = (rx, ry, 0) reduces to ω.Z * r.Perp()
+            // regardless of Z convention (Z-up or Z-down), since only the Z
+            // component of ω contributes to the XY contact velocity.
             FixVec2 va_contact = a.LinearVelocity + a.AngularVelocity.Z * ra.Perp();
             FixVec2 vb_contact = b.LinearVelocity + b.AngularVelocity.Z * rb.Perp();
             FixVec2 v_rel      = va_contact - vb_contact;
