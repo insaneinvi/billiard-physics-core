@@ -18,6 +18,25 @@ namespace BilliardPhysics
         private static readonly Fix64 Epsilon = Fix64.From(1) / Fix64.From(1000);
 
         public static void Step(Ball ball, Fix64 dt)
+            => Step(ball, dt, Fix64.Zero);
+
+        /// <summary>
+        /// Advances ball state by <paramref name="dt"/> seconds, applying table-surface
+        /// friction in addition to per-ball friction coefficients.
+        /// </summary>
+        /// <param name="ball">The ball to advance.</param>
+        /// <param name="dt">Time step in seconds.</param>
+        /// <param name="tableFriction">
+        /// Additional rolling-resistance coefficient contributed by the table surface
+        /// (see <see cref="PhysicsWorld2D.TableFriction"/>).  Default = 0 (no extra friction).
+        /// During the rolling phase this is added to <see cref="Ball.RollingFriction"/> to
+        /// increase linear-velocity decay; the rolling-contact constraint
+        /// (<c>ω.Y = −Lv.X / R</c>) then automatically couples the linear deceleration
+        /// into a proportional change of the Y-axis angular velocity.
+        /// During the sliding phase this is added to <see cref="Ball.SlidingFriction"/>
+        /// so that the translation-to-rotation impulse is also proportionally larger.
+        /// </param>
+        public static void Step(Ball ball, Fix64 dt, Fix64 tableFriction)
         {
             if (ball.IsPocketed) return;
 
@@ -55,8 +74,10 @@ namespace BilliardPhysics
                              (ball.Mass * R * R + ball.Inertia);
 
                 // Coulomb limit: μ * m * g * dt; cap so we never over-correct.
+                // tableFriction adds to the effective sliding coefficient so that table
+                // surface friction contributes to the translation-to-rotation coupling.
                 Fix64 jZero = slip * mEff;
-                Fix64 jMax  = ball.SlidingFriction * ball.Mass * Gravity * dt;
+                Fix64 jMax  = (ball.SlidingFriction + tableFriction) * ball.Mass * Gravity * dt;
                 Fix64 jMag  = Fix64.Min(jZero, jMax);
 
                 // Friction impulse direction: opposing the slip.
@@ -96,7 +117,10 @@ namespace BilliardPhysics
                 if (speed > Epsilon)
                 {
                     // Pure rolling: apply rolling resistance to linear velocity.
-                    Fix64 rollingDecel = ball.RollingFriction * Gravity;
+                    // tableFriction is added to ball.RollingFriction here; the rolling
+                    // constraint (ω.Y = −Lv.X / R) couples this deceleration into a
+                    // proportional change of the Y-axis angular velocity automatically.
+                    Fix64 rollingDecel = (ball.RollingFriction + tableFriction) * Gravity;
                     Fix64 decelDt      = rollingDecel * dt;
 
                     if (speed <= decelDt)

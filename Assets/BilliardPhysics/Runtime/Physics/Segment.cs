@@ -30,6 +30,17 @@ namespace BilliardPhysics
         /// <summary>Total polyline length: sum of all sub-segment lengths.</summary>
         public Fix64 Length { get; }
 
+        /// <summary>
+        /// Coefficient of restitution for this cushion surface (0–1).
+        /// Controls how much of the ball's normal velocity is preserved on bounce:
+        /// <c>1.0</c> = perfectly elastic (no energy loss, default);
+        /// <c>0.0</c> = perfectly inelastic (normal velocity fully absorbed).
+        /// Set per-segment to simulate different cushion materials or worn rails.
+        /// Combined with <see cref="Ball.Restitution"/> via the minimum of both values
+        /// inside <see cref="ImpulseResolver.ResolveBallCushion"/>.
+        /// </summary>
+        public Fix64 Restitution = Fix64.One;
+
         // ── Constructors ──────────────────────────────────────────────────────────
 
         /// <summary>Creates a single-sub-segment (degenerate polyline) from Start to End.</summary>

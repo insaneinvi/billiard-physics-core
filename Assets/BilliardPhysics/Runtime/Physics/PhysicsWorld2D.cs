@@ -5,6 +5,25 @@ namespace BilliardPhysics
 {
     public class PhysicsWorld2D
     {
+        // ── Physics configuration ─────────────────────────────────────────────────
+
+        /// <summary>
+        /// Additional rolling-resistance coefficient for the table surface (dimensionless).
+        /// This is added to each ball's own <see cref="Ball.RollingFriction"/> and
+        /// <see cref="Ball.SlidingFriction"/> inside <see cref="MotionSimulator.Step"/>,
+        /// producing faster linear-velocity decay and a proportionally larger
+        /// translation-to-rotation coupling on <c>AngularVelocity.Y</c> (and X).
+        /// <para/>
+        /// Simplified model: the table friction is treated as an isotropic Coulomb
+        /// friction coefficient on top of per-ball values.  During pure rolling the
+        /// rolling constraint <c>ω.Y = −Lv.X / R</c> automatically couples any extra
+        /// linear deceleration into a matching change of Y-axis angular velocity.
+        /// <para/>
+        /// Default = 0 (no extra friction, preserves existing per-ball behaviour).
+        /// Typical useful range: 0.005–0.05.
+        /// </summary>
+        public Fix64 TableFriction = Fix64.Zero;
+
         // ── Internal state ────────────────────────────────────────────────────────
         private readonly List<Ball>    _balls          = new List<Ball>();
         private readonly List<Segment> _tableSegments  = new List<Segment>();
@@ -97,7 +116,7 @@ namespace BilliardPhysics
                 {
                     // No collision: advance all balls for the full remaining time.
                     foreach (Ball ball in _balls)
-                        MotionSimulator.Step(ball, remainingTime);
+                        MotionSimulator.Step(ball, remainingTime, TableFriction);
                     CheckPocketCaptures();
                     break;
                 }
@@ -107,7 +126,7 @@ namespace BilliardPhysics
                 if (advanceTime > Fix64.Zero)
                 {
                     foreach (Ball ball in _balls)
-                        MotionSimulator.Step(ball, advanceTime);
+                        MotionSimulator.Step(ball, advanceTime, TableFriction);
                 }
 
                 // Resolve the collision.
@@ -122,7 +141,8 @@ namespace BilliardPhysics
                 {
                     Ball ball = FindBallById(result.BallA);
                     if (ball != null)
-                        ImpulseResolver.ResolveBallCushion(ball, result.HitNormal);
+                        ImpulseResolver.ResolveBallCushion(ball, result.HitNormal,
+                            result.Segment != null ? result.Segment.Restitution : Fix64.One);
                 }
 
                 // Consume advance time plus a small safety margin.
