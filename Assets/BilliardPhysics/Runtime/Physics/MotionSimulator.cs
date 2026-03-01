@@ -1,13 +1,11 @@
-using UnityEngine;
-
 namespace BilliardPhysics
 {
     /// <summary>
     /// Advances ball linear and angular motion under friction, without resolving collisions.
     /// Coordinate convention: Z-down (+Z points toward the table; table normal n = (0,0,-1)).
     /// Ball center-to-contact-point vector: r = (0, 0, +Radius) (points in +Z, i.e. downward).
-    /// Ball.Rotation is integrated in this physics frame; apply the change-of-basis
-    /// R_render = M·R_physics·M (M = diag(1,1,-1)) before assigning to Unity's transform.rotation.
+    /// Use <see cref="BilliardPhysics.Runtime.ViewTool.PhysicsToView.IntegrateRotation"/> to
+    /// convert AngularVelocity into a Unity transform.rotation each frame.
     /// </summary>
     public static class MotionSimulator
     {
@@ -157,18 +155,6 @@ namespace BilliardPhysics
 
             // ── Integrate position ────────────────────────────────────────────────
             ball.Position += ball.LinearVelocity * dt;
-
-            // ── Integrate rotation ────────────────────────────────────────────────
-            // Rotation axis = ω / |ω|; angle increment = |ω| * dt  (rad).
-            // Unlike the old code, the axis is NOT fixed to Z; it follows ω direction.
-            Fix64 omegaMag = ball.AngularVelocity.Magnitude;
-            if (omegaMag > Epsilon)
-            {
-                FixVec3 axis     = ball.AngularVelocity / omegaMag;
-                float   angleDeg = omegaMag.ToFloat() * dt.ToFloat() * UnityEngine.Mathf.Rad2Deg;
-                var     axisV3   = new UnityEngine.Vector3(axis.X.ToFloat(), axis.Y.ToFloat(), axis.Z.ToFloat());
-                ball.Rotation    = (UnityEngine.Quaternion.AngleAxis(angleDeg, axisV3) * ball.Rotation).normalized;
-            }
         }
     }
 }

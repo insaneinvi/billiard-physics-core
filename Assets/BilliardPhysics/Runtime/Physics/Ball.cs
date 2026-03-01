@@ -1,5 +1,3 @@
-using UnityEngine;
-
 namespace BilliardPhysics
 {
     public class Ball
@@ -19,18 +17,6 @@ namespace BilliardPhysics
         public FixVec3    AngularVelocity;
         public bool       IsMotionless;
         public bool       IsPocketed;
-
-        // ── Rendering ─────────────────────────────────────────────────────────────
-        /// <summary>
-        /// 3D orientation for rendering. Updated each simulation step by integrating
-        /// AngularVelocity (rad/s) around the ω direction (not fixed to any axis).
-        /// Stored in the physics coordinate system (Z-down: +Z toward table; table
-        /// normal = (0,0,-1)). Before assigning to Unity's Transform.rotation, apply
-        /// the change-of-basis conversion R_render = M·R_physics·M (M = diag(1,1,-1)),
-        /// which negates the quaternion X and Y components:
-        ///   transform.rotation = new Quaternion(-Rotation.x, -Rotation.y, Rotation.z, Rotation.w)
-        /// </summary>
-        public Quaternion Rotation = Quaternion.identity;
 
         // ── Physical parameters ───────────────────────────────────────────────────
         public Fix64 Radius;
@@ -75,7 +61,6 @@ namespace BilliardPhysics
             AngularVelocity = FixVec3.Zero;
             IsMotionless    = true;
             IsPocketed      = false;
-            Rotation        = Quaternion.identity;
         }
     }
 }
