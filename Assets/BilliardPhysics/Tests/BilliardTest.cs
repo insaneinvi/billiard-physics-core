@@ -27,6 +27,18 @@ public class BilliardTest : MonoBehaviour
         InitViewWorld(rackResult);
         var stepInterval = 1 / 60f;
         Time.fixedDeltaTime = stepInterval;
+        
+        var debug = new PhysicsWorld2DDebug();
+        debug.SetTableGeometry(_physicsWorld.TableSegments, _physicsWorld.Pockets);
+        debug.SetBalls(_physicsWorld.Balls);
+        debug.SetDebug(true);
+        pDebug = debug;
+    }
+
+    private PhysicsWorld2DDebug pDebug;
+    private void OnDestroy()
+    {
+        pDebug.Dispose();
     }
 
     private void InitViewWorld(RackResult rackResult)
@@ -123,7 +135,7 @@ public class BilliardTest : MonoBehaviour
     {
         if (!isAllBallMotionless) return;
         FixVec2 direction = new FixVec2(Fix64.One, Fix64.Zero).Normalized;
-        Fix64 strength = Fix64.From(160000);
+        Fix64 strength = Fix64.From(500000);
         _physicsWorld.ApplyCueStrike(cueBall, direction, strength, Fix64.Zero, Fix64.Zero);
     }
 }
