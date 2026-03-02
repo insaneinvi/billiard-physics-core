@@ -19,6 +19,14 @@ namespace BilliardPhysics
 
         private const int MaxSubSteps = 20;
 
+        /// <summary>
+        /// Additional rolling-resistance coefficient contributed by the table cloth surface.
+        /// Passed directly to <see cref="MotionSimulator.Step"/> each substep.
+        /// Set to <see cref="BilliardsPhysicsDefaults.PhysicsWorld2D_TableFriction"/> for
+        /// a realistic cloth drag; zero means no extra table friction beyond per-ball values.
+        /// </summary>
+        public Fix64 TableFriction { get; set; } = Fix64.Zero;
+
         private static readonly Fix64 CaptureRadiusFactor = Fix64.One;
         // A factor of 1 means the ball is captured as soon as its centre enters
         // the full pocket radius.  Formerly 0.5 (half radius), which was too restrictive.
@@ -103,7 +111,7 @@ namespace BilliardPhysics
                 {
                     // No collision: advance all balls for the full remaining time.
                     foreach (Ball ball in _balls)
-                        MotionSimulator.Step(ball, remainingTime);
+                        MotionSimulator.Step(ball, remainingTime, TableFriction);
                     CheckPocketCaptures();
                     break;
                 }
@@ -113,7 +121,7 @@ namespace BilliardPhysics
                 if (advanceTime > Fix64.Zero)
                 {
                     foreach (Ball ball in _balls)
-                        MotionSimulator.Step(ball, advanceTime);
+                        MotionSimulator.Step(ball, advanceTime, TableFriction);
                 }
 
                 // Resolve the collision.
@@ -203,13 +211,20 @@ namespace BilliardPhysics
                 foreach (Pocket pocket in _pockets)
                 {
                     Fix64 dist = FixVec2.Distance(ball.Position, pocket.Center);
-                    if (dist < pocket.Radius * CaptureRadiusFactor)
-                    {
-                        ball.IsPocketed       = true;
-                        ball.LinearVelocity   = FixVec2.Zero;
-                        ball.AngularVelocity  = FixVec3.Zero;
-                        break;
-                    }
+                    if (dist >= pocket.Radius * CaptureRadiusFactor) continue;
+
+                    // Requirement 1: only capture the ball when it is moving slowly enough.
+                    // Fast balls (speed >= PocketSinkSpeedThreshold) must first slow down —
+                    // typically by bouncing off the low-restitution RimSegment — before they
+                    // can be captured.  This prevents high-speed balls from being pocketed
+                    // instantaneously and gives the rim-collision logic time to absorb energy.
+                    Fix64 speed = ball.LinearVelocity.Magnitude;
+                    if (speed >= BilliardsPhysicsDefaults.PocketSinkSpeedThreshold) continue;
+
+                    ball.IsPocketed       = true;
+                    ball.LinearVelocity   = FixVec2.Zero;
+                    ball.AngularVelocity  = FixVec3.Zero;
+                    break;
                 }
             }
         }
