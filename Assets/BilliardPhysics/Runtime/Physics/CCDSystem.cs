@@ -68,6 +68,17 @@ namespace BilliardPhysics
 
             if (t < Fix64.Zero || t > dt) return false;
 
+            // Guard against Fix64 integer overflow in the bCoeff*bCoeff term.
+            // For typical billiard speeds and separations, bCoeff ≈ 2·|dp|·|dv| can exceed
+            // ~46 000 (the Fix64 overflow threshold for squaring), causing the discriminant
+            // to appear non-negative for non-collisions (false positives).  Validate by
+            // checking whether the balls are genuinely touching at the candidate TOI: if the
+            // distance between their centres still exceeds radSum, the result is spurious.
+            FixVec2 posA = a.Position + a.LinearVelocity * t;
+            FixVec2 posB = b.Position + b.LinearVelocity * t;
+            if (FixVec2.Distance(posA, posB) > radSum)
+                return false;
+
             toi = t;
             return true;
         }

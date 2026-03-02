@@ -1260,5 +1260,61 @@ namespace BilliardPhysics.Tests
                 $"after={ball.LinearVelocity.Magnitude.ToFloat():F1}, " +
                 $"pocketed={ball.IsPocketed}");
         }
+
+        // ── Regression: near-miss must not impart velocity to stationary ball ──────
+
+        /// <summary>
+        /// Regression test for the "ghost collision" bug: when the cue ball passes close
+        /// to a stationary ball but does NOT touch it (minimum centre-to-centre distance
+        /// is clearly greater than <c>a.Radius + b.Radius</c>), the stationary ball must
+        /// not gain any velocity.
+        ///
+        /// Root cause: Fix64 integer overflow in <c>bCoeff * bCoeff</c> inside
+        /// <see cref="CCDSystem.SweptCircleCircle"/> caused the swept-circle discriminant
+        /// to appear non-negative for non-collisions ("false positive").  This triggered
+        /// <see cref="ImpulseResolver.ResolveBallBall"/> for balls that never touched,
+        /// imparting a spurious impulse to the stationary ball.
+        ///
+        /// Fix: after computing the candidate TOI, <see cref="CCDSystem.SweptCircleCircle"/>
+        /// now validates that the actual distance between the two ball centres at that
+        /// time is ≤ <c>radSum</c>; if not, the result is discarded.
+        /// </summary>
+        [Test]
+        public void Step_CueBallPassesByStationaryBall_NearMissBallRemainsStationary()
+        {
+            var world = new PhysicsWorld2D();
+
+            var ballA = new Ball(0);  // cue ball – moving
+            var ballB = new Ball(1);  // target ball – stationary
+
+            Fix64 radSum = ballA.Radius + ballB.Radius;  // ≈ 57.15 mm
+
+            // Ball A moves horizontally at 5 000 mm/s along y = 0.
+            // Ball B sits 60 mm above Ball A's path, giving a minimum centre-to-centre
+            // distance of 60 mm which is clearly greater than radSum (≈ 57.15 mm).
+            ballA.Position       = new FixVec2(Fix64.From(-60), Fix64.Zero);
+            ballA.LinearVelocity = new FixVec2(Fix64.From(5000), Fix64.Zero);
+            ballB.Position       = new FixVec2(Fix64.Zero, Fix64.From(60));
+            ballB.LinearVelocity = FixVec2.Zero;
+
+            Assert.IsTrue(Fix64.From(60) > radSum,
+                $"Test pre-condition: Ball B must be placed beyond radSum ({radSum.ToFloat():F2} mm).");
+
+            world.AddBall(ballA);
+            world.AddBall(ballB);
+
+            // Run enough steps for ball A to pass by ball B completely.
+            for (int i = 0; i < 5; i++)
+                world.Step();
+
+            // Ball B must not have gained any meaningful velocity.
+            // A threshold of 1 mm/s is orders of magnitude above Fix64 rounding noise
+            // yet orders of magnitude below any physically real impulse.
+            float speedB = ballB.LinearVelocity.Magnitude.ToFloat();
+            Assert.IsTrue(speedB < 1f,
+                $"Ball B must remain stationary when cue ball passes by without contact. " +
+                $"minDist=60 mm, radSum={radSum.ToFloat():F2} mm, " +
+                $"ball B speed after pass = {speedB:F4} mm/s (must be < 1 mm/s).");
+        }
     }
 }
