@@ -5,6 +5,7 @@ using BilliardPhysics;
 using BilliardPhysics.Runtime.BallInfo;
 using BilliardPhysics.Runtime.ViewTool;
 using UnityEngine;
+using Random = System.Random;
 
 public class BilliardTest : MonoBehaviour
 {
@@ -30,17 +31,17 @@ public class BilliardTest : MonoBehaviour
         var stepInterval = 1 / 60f;
         Time.fixedDeltaTime = stepInterval;
         
-        // var debug = new PhysicsWorld2DDebug();
-        // debug.SetTableGeometry(_physicsWorld.TableSegments, _physicsWorld.Pockets);
-        // debug.SetBalls(_physicsWorld.Balls);
-        // debug.SetDebug(true);
-        // pDebug = debug;
+        var debug = new PhysicsWorld2DDebug();
+        debug.SetTableGeometry(_physicsWorld.TableSegments, _physicsWorld.Pockets);
+        debug.SetBalls(_physicsWorld.Balls);
+        debug.SetDebug(true);
+        pDebug = debug;
     }
 
     private PhysicsWorld2DDebug pDebug;
     private void OnDestroy()
     {
-        // pDebug.Dispose();
+        pDebug.Dispose();
     }
 
     private void InitViewWorld(RackResult rackResult)
@@ -110,8 +111,6 @@ public class BilliardTest : MonoBehaviour
             objBall.Position = new FixVec2(Fix64.FromFloat(ob.Position.x),  Fix64.FromFloat(ob.Position.y));
             _physicsWorld.AddBall(objBall);
         }
-
-        _physicsWorld.TableFriction = BilliardsPhysicsDefaults.PhysicsWorld2D_TableFriction;
     }
 
     private void FixedUpdate()
@@ -153,7 +152,7 @@ public class BilliardTest : MonoBehaviour
     {
         if (!isAllBallMotionless) return;
         FixVec2 direction = new FixVec2(Fix64.One, Fix64.Zero).Normalized;
-        Fix64 strength = Fix64.From(500000);
-        _physicsWorld.ApplyCueStrike(cueBall, direction, strength, Fix64.Zero, Fix64.Zero);
+        Fix64 strength = Fix64.From(1000000);
+        _physicsWorld.ApplyCueStrike(cueBall, direction, strength, BilliardsPhysicsDefaults.Ball_Radius/10 * (new Random().Next(2) - 1), BilliardsPhysicsDefaults.Ball_Radius/10 * (new Random().Next(2) - 1));
     }
 }

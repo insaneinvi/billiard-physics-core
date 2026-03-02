@@ -22,7 +22,7 @@ namespace BilliardPhysics
         /// A value of 0.75 represents a typical rubber-cushion billiard rail.
         /// Combined with the ball's own restitution via the minimum of both values.
         /// </summary>
-        public static readonly Fix64 Segment_Restitution = Fix64.FromFloat(0.85f, 4);
+        public static readonly Fix64 Segment_Restitution = Fix64.FromFloat(0.75f, 4);
 
         /// <summary>
         /// Minimum cue-strike strength (linear impulse, in g·mm/s).
