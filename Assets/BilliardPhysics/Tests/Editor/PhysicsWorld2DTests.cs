@@ -110,19 +110,21 @@ namespace BilliardPhysics.Tests
                 $"Balls must not penetrate: dist={dist.ToFloat():F3}, radSum={radSum.ToFloat():F3}");
         }
 
-        // ── Bug 2: False rebounds from pocket rim segments ────────────────────────
+        // ── Pocket rim collision (Requirement 2) ─────────────────────────────────
 
         /// <summary>
-        /// FindEarliestCollision must NOT return a hit for a pocket's rim segment.
-        /// Pockets are trigger volumes; their rim segments are not solid walls.
-        /// Before the fix: pocket rim was tested as a cushion → ball bounced.
-        /// After the fix: pocket rim block is removed → no rim collision returned.
+        /// A ball inside the pocket area moving PARALLEL to the rim segment must not
+        /// register a rim collision, because the swept-circle face test is skipped when
+        /// the ball velocity has no component toward the segment normal (vn ≥ 0).
+        /// Although rim collision is now enabled for balls inside the pocket area, the
+        /// geometry of this test means no hit is detected — the ball slides past the rim
+        /// without approaching its face or reaching its endpoints.
         /// </summary>
         [Test]
         public void FindEarliestCollision_BallInsidePocketArea_NoPocketRimCollision()
         {
             var pocket = MakePocket(0f, 0f, 100f);
-            // Give the pocket a rim segment that crosses the ball's path.
+            // Horizontal rim segment; ball moves along Y=0 (parallel to the rim).
             pocket.RimSegment = new Segment(
                 new FixVec2(Fix64.From(-200), Fix64.Zero),
                 new FixVec2(Fix64.From( 200), Fix64.Zero));
@@ -139,22 +141,25 @@ namespace BilliardPhysics.Tests
                 CCDSystem.FindEarliestCollision(balls, segments, pockets, Fix64.One);
 
             Assert.IsFalse(result.Hit,
-                "Pocket rim must not register as a solid cushion collision.");
+                "A ball moving parallel to the rim inside the pocket area must not register a rim collision.");
         }
 
         /// <summary>
-        /// Integration test: a ball moving toward a pocket (no table segments present)
-        /// must NOT receive a cushion bounce from the pocket rim.
+        /// Integration test: a ball moving toward a pocket with a low-restitution rim segment
+        /// must be pocketed after the rim absorbs most of its energy.
+        /// The ball hits the rim (active inside the pocket area), bounces back slowly, and
+        /// is then captured because its speed drops below PocketSinkSpeedThreshold.
         /// </summary>
         [Test]
-        public void Step_BallMovingIntoPocket_NoRimBounce()
+        public void Step_BallMovingIntoPocket_LowRestitutionRimAbsorbsEnergyAndPockets()
         {
             var world = new PhysicsWorld2D();
             var pocket = MakePocket(200f, 0f, 60f);
-            // Rim segment directly in the ball's path.
+            // Rim segment directly in the ball's path; low restitution absorbs energy.
             pocket.RimSegment = new Segment(
                 new FixVec2(Fix64.From(200), Fix64.From(-100)),
                 new FixVec2(Fix64.From(200), Fix64.From( 100)));
+            pocket.RimSegment.Restitution = BilliardsPhysicsDefaults.PocketRimRestitution;
             world.AddPocket(pocket);
 
             var ball = new Ball(0);
@@ -162,15 +167,16 @@ namespace BilliardPhysics.Tests
             ball.LinearVelocity = new FixVec2(Fix64.From(1000), Fix64.Zero);
             world.AddBall(ball);
 
-            Fix64 initialVelX = ball.LinearVelocity.X;
+            // Simulate until ball is pocketed or a maximum number of steps is reached.
+            bool pocketed = false;
+            for (int i = 0; i < 60 && !pocketed; i++)
+            {
+                world.Step();
+                pocketed = ball.IsPocketed;
+            }
 
-            world.Step();
-
-            // Ball must have moved in the positive-X direction (no reversed velocity from rim).
-            // After one step at 1/60 s the ball is still travelling right (possibly pocketed).
-            bool notReversed = ball.IsPocketed || ball.LinearVelocity.X >= Fix64.Zero;
-            Assert.IsTrue(notReversed,
-                "Ball heading into a pocket must not bounce off the pocket rim.");
+            Assert.IsTrue(pocketed,
+                "Ball hitting low-restitution rim must lose enough energy to be captured.");
         }
 
         // ── Bug 3: Pocketing does not work ────────────────────────────────────────
@@ -203,24 +209,26 @@ namespace BilliardPhysics.Tests
         }
 
         /// <summary>
-        /// A fast-moving ball that reaches the pocket area during a step must be pocketed.
-        /// This exercises the case where the ball enters the pocket on the no-collision path.
+        /// A slow-rolling ball (speed below PocketSinkSpeedThreshold) that enters a pocket
+        /// area must be captured.  This exercises the case where the ball enters the pocket
+        /// on the no-collision path at low speed.
         /// </summary>
         [Test]
-        public void Step_FastBallEnteringPocket_IsPocketedAfterSufficientSteps()
+        public void Step_SlowBallEnteringPocket_IsPocketedAfterSufficientSteps()
         {
             var world = new PhysicsWorld2D();
 
-            // Pocket at x=300, radius=60.
-            var pocket = MakePocket(300f, 0f, 60f);
+            // Pocket close to ball start so it enters within a handful of steps.
+            var pocket = MakePocket(50f, 0f, 60f);
             world.AddPocket(pocket);
 
             var ball = new Ball(0);
             ball.Position       = new FixVec2(Fix64.Zero, Fix64.Zero);
-            ball.LinearVelocity = new FixVec2(Fix64.From(2000), Fix64.Zero);
+            // 200 mm/s is well below PocketSinkSpeedThreshold (500 mm/s).
+            ball.LinearVelocity = new FixVec2(Fix64.From(200), Fix64.Zero);
             world.AddBall(ball);
 
-            // Simulate until the ball should have crossed into the pocket.
+            // Ball starts inside the pocket radius (50 < 60) — pocketed on first Step.
             bool pocketed = false;
             for (int i = 0; i < 60 && !pocketed; i++)
             {
@@ -229,18 +237,18 @@ namespace BilliardPhysics.Tests
             }
 
             Assert.IsTrue(pocketed,
-                "A ball directed into a pocket must be pocketed within 60 steps.");
+                "A slow ball inside the pocket area must be pocketed within 60 steps.");
         }
 
-        // ── Bug 3 continued: velocity threshold was too low ───────────────────────
+        // ── Requirement 1: speed-threshold pocket capture ─────────────────────────
 
         /// <summary>
-        /// A ball moving at typical billiard speed (much faster than the old
-        /// ReboundVelocityThreshold of 1 unit/s) that enters the pocket area must be
-        /// captured.  Under the old code the velocity check prevented capture entirely.
+        /// A ball moving at or above PocketSinkSpeedThreshold (500 mm/s) that is inside
+        /// the pocket area must NOT be captured.  High-speed balls need to slow down first
+        /// (via rim collisions) before they can be pocketed.
         /// </summary>
         [Test]
-        public void CheckPocketCaptures_FastBallInsidePocket_IsCaptured()
+        public void CheckPocketCaptures_FastBallInsidePocket_NotCaptured()
         {
             var world = new PhysicsWorld2D();
 
@@ -248,15 +256,38 @@ namespace BilliardPhysics.Tests
             world.AddPocket(pocket);
 
             var ball = new Ball(0);
-            // Ball is already inside pocket area at high speed.
+            // Ball is already inside pocket area at high speed (>= threshold).
             ball.Position       = new FixVec2(Fix64.Zero, Fix64.Zero);
-            ball.LinearVelocity = new FixVec2(Fix64.From(500), Fix64.Zero);
+            ball.LinearVelocity = new FixVec2(Fix64.From(500), Fix64.Zero);  // exactly at threshold
+            world.AddBall(ball);
+
+            world.Step();
+
+            Assert.IsFalse(ball.IsPocketed,
+                "A ball at or above PocketSinkSpeedThreshold must not be captured immediately.");
+        }
+
+        /// <summary>
+        /// Boundary condition: a ball moving at one unit below the threshold (499 mm/s)
+        /// must be captured, confirming the threshold boundary is exclusive for fast balls.
+        /// </summary>
+        [Test]
+        public void CheckPocketCaptures_BallJustBelowThreshold_IsCaptured()
+        {
+            var world  = new PhysicsWorld2D();
+            var pocket = MakePocket(0f, 0f, 50f);
+            world.AddPocket(pocket);
+
+            var ball = new Ball(0);
+            ball.Position       = new FixVec2(Fix64.Zero, Fix64.Zero);
+            // 499 mm/s is one unit below PocketSinkSpeedThreshold (500 mm/s).
+            ball.LinearVelocity = new FixVec2(Fix64.From(499), Fix64.Zero);
             world.AddBall(ball);
 
             world.Step();
 
             Assert.IsTrue(ball.IsPocketed,
-                "A fast ball inside the pocket area must be captured regardless of speed.");
+                "A ball just below PocketSinkSpeedThreshold (499 < 500) must be captured.");
         }
 
         // ── No-false-bounce from table cushion ────────────────────────────────────
@@ -1069,6 +1100,165 @@ namespace BilliardPhysics.Tests
                 Assert.IsTrue(ball.Position.Y >= -halfH && ball.Position.Y <= halfH,
                     $"Ball escaped table in Y at step {step}: y={ball.Position.Y.ToFloat():F3}");
             }
+        }
+
+        // ── Requirement 1: additional speed-threshold tests ───────────────────────
+
+        /// <summary>
+        /// A slow ball (speed below PocketSinkSpeedThreshold) inside the pocket area
+        /// must be captured on the first Step.
+        /// </summary>
+        [Test]
+        public void CheckPocketCaptures_SlowBallInsidePocket_IsCaptured()
+        {
+            var world = new PhysicsWorld2D();
+            var pocket = MakePocket(0f, 0f, 50f);
+            world.AddPocket(pocket);
+
+            var ball = new Ball(0);
+            ball.Position       = new FixVec2(Fix64.Zero, Fix64.Zero);
+            // 200 mm/s is well below PocketSinkSpeedThreshold (500 mm/s).
+            ball.LinearVelocity = new FixVec2(Fix64.From(200), Fix64.Zero);
+            world.AddBall(ball);
+
+            world.Step();
+
+            Assert.IsTrue(ball.IsPocketed,
+                "A slow ball (speed < threshold) inside the pocket area must be captured.");
+        }
+
+        /// <summary>
+        /// A high-speed ball (≥ PocketSinkSpeedThreshold) passing through a pocket area
+        /// with no rim segment must not be captured immediately; it continues on its path.
+        /// This verifies Requirement 1: only slow balls are pocketed.
+        /// </summary>
+        [Test]
+        public void Step_HighSpeedBallInsidePocketNoRim_NotImmediatelyPocketed()
+        {
+            var world = new PhysicsWorld2D();
+            // Pocket with no rim segment.
+            var pocket = MakePocket(0f, 0f, 100f);
+            world.AddPocket(pocket);
+
+            var ball = new Ball(0);
+            // Ball starts inside the pocket area at high speed.
+            ball.Position       = new FixVec2(Fix64.Zero, Fix64.Zero);
+            // 2000 mm/s >> PocketSinkSpeedThreshold (500 mm/s).
+            ball.LinearVelocity = new FixVec2(Fix64.From(2000), Fix64.Zero);
+            world.AddBall(ball);
+
+            world.Step();
+
+            Assert.IsFalse(ball.IsPocketed,
+                "A high-speed ball (speed >= threshold) must not be captured immediately.");
+            // Ball must still be moving (not frozen).
+            Assert.IsTrue(ball.LinearVelocity.Magnitude > Fix64.Zero,
+                "A non-pocketed ball must retain its velocity.");
+        }
+
+        // ── Requirement 2: rim collision inside pocket area ───────────────────────
+
+        /// <summary>
+        /// When a ball is inside a pocket's trigger radius and approaching the rim segment,
+        /// FindEarliestCollision must return a hit for the rim segment.
+        /// Rim collision is only active inside the pocket area to avoid interfering with
+        /// the rest of the table.
+        /// </summary>
+        [Test]
+        public void FindEarliestCollision_BallInsidePocketApproachingRim_RimCollisionDetected()
+        {
+            // Pocket at origin; rim is a vertical segment inside the pocket area.
+            var pocket = MakePocket(0f, 0f, 100f);
+            // Rim at x=50, pointing left (-1,0) — ball approaches from the left.
+            pocket.RimSegment = new Segment(
+                new FixVec2(Fix64.From(50), Fix64.From(-100)),
+                new FixVec2(Fix64.From(50), Fix64.From( 100)));
+
+            var ball = new Ball(0);
+            // Ball inside the pocket area, heading toward the rim.
+            ball.Position       = new FixVec2(Fix64.From(-30), Fix64.Zero);
+            ball.LinearVelocity = new FixVec2(Fix64.From(100), Fix64.Zero);
+
+            var balls    = new List<Ball>    { ball };
+            var segments = new List<Segment>();
+            var pockets  = new List<Pocket>  { pocket };
+
+            CCDSystem.TOIResult result =
+                CCDSystem.FindEarliestCollision(balls, segments, pockets, Fix64.One);
+
+            Assert.IsTrue(result.Hit,
+                "A ball inside the pocket area approaching the rim must detect a rim collision.");
+            Assert.AreEqual(pocket.RimSegment, result.Segment,
+                "The hit segment must be the pocket's rim segment.");
+        }
+
+        /// <summary>
+        /// When a ball is OUTSIDE the pocket's trigger radius, the rim segment must NOT
+        /// be tested.  Rim collision is intentionally limited to the pocket area to avoid
+        /// spurious bounces on the rest of the table.
+        /// </summary>
+        [Test]
+        public void FindEarliestCollision_BallOutsidePocketApproachingRim_NoRimCollision()
+        {
+            // Pocket at origin radius 50; rim extends further than the pocket radius.
+            var pocket = MakePocket(0f, 0f, 50f);
+            pocket.RimSegment = new Segment(
+                new FixVec2(Fix64.From(30), Fix64.From(-200)),
+                new FixVec2(Fix64.From(30), Fix64.From( 200)));
+
+            var ball = new Ball(0);
+            // Ball is OUTSIDE the pocket area (dist = 100 > 50), heading toward the rim.
+            ball.Position       = new FixVec2(Fix64.From(-100), Fix64.Zero);
+            ball.LinearVelocity = new FixVec2(Fix64.From(500), Fix64.Zero);
+
+            var balls    = new List<Ball>    { ball };
+            var segments = new List<Segment>();
+            var pockets  = new List<Pocket>  { pocket };
+
+            CCDSystem.TOIResult result =
+                CCDSystem.FindEarliestCollision(balls, segments, pockets, Fix64.One);
+
+            Assert.IsFalse(result.Hit,
+                "A ball outside the pocket area must not collide with the rim segment.");
+        }
+
+        /// <summary>
+        /// Oblique rim grazing: a ball that hits the pocket rim segment at an angle must
+        /// have its post-bounce speed significantly lower than its pre-bounce speed, due
+        /// to the low PocketRimRestitution.  Verifies Requirement 2 end-to-end.
+        /// </summary>
+        [Test]
+        public void Step_BallHitsRimInsidePocket_SpeedSignificantlyReduced()
+        {
+            var world  = new PhysicsWorld2D();
+            var pocket = MakePocket(200f, 0f, 80f);
+            // Vertical rim at x=200 with low restitution; ball approaches head-on.
+            pocket.RimSegment = new Segment(
+                new FixVec2(Fix64.From(200), Fix64.From(-100)),
+                new FixVec2(Fix64.From(200), Fix64.From( 100)));
+            pocket.RimSegment.Restitution = BilliardsPhysicsDefaults.PocketRimRestitution;
+            world.AddPocket(pocket);
+
+            var ball = new Ball(0);
+            // Ball starts inside the pocket area (dist from (200,0) = 50 < 80), heading right.
+            ball.Position       = new FixVec2(Fix64.From(150), Fix64.Zero);
+            ball.LinearVelocity = new FixVec2(Fix64.From(1000), Fix64.Zero);
+            world.AddBall(ball);
+
+            Fix64 speedBefore = ball.LinearVelocity.Magnitude;
+
+            // Run until ball hits rim and bounces (or is pocketed).
+            for (int i = 0; i < 30 && !ball.IsPocketed; i++)
+                world.Step();
+
+            // Either pocketed (speed dropped below threshold) or noticeably slower.
+            bool energyAbsorbed = ball.IsPocketed ||
+                ball.LinearVelocity.Magnitude < speedBefore / Fix64.From(2);
+            Assert.IsTrue(energyAbsorbed,
+                $"Low-restitution rim must absorb most ball energy; " +
+                $"before={speedBefore.ToFloat():F1}, " +
+                $"after={ball.LinearVelocity.Magnitude.ToFloat():F1}, " +
+                $"pocketed={ball.IsPocketed}");
         }
     }
 }

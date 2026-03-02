@@ -355,8 +355,43 @@ namespace BilliardPhysics
                     }
                 }
 
-                // Pockets are trigger volumes, not solid walls; rim segments are not
-                // tested for collision here.  Capture is handled by CheckPocketCaptures.
+                // Requirement 2: when the ball is inside a pocket's trigger radius, also
+                // test the pocket's RimSegment as a solid obstacle.  The rim is only
+                // activated inside the pocket area so that it never interferes with normal
+                // cushion reflections on the rest of the table.  Its Restitution is set to
+                // a low value (PocketRimRestitution) so that the ball loses most of its
+                // normal velocity on contact, slowing it below PocketSinkSpeedThreshold so
+                // that CheckPocketCaptures can subsequently capture it.
+                for (int pi = 0; pi < pockets.Count; pi++)
+                {
+                    Pocket pocket = pockets[pi];
+                    if (pocket.RimSegment == null) continue;
+
+                    Fix64 distToPocket = FixVec2.Distance(ball.Position, pocket.Center);
+                    if (distToPocket >= pocket.Radius) continue;  // only active inside pocket area
+
+                    NarrowPhaseSegmentCalls++;
+                    Fix64   toi;
+                    FixVec2 hitNormal;
+                    FixVec2 hitPoint;
+                    if (SweptCircleSegment(ball, pocket.RimSegment, dt, out toi, out hitNormal, out hitPoint))
+                    {
+                        if (!best.Hit || toi < best.TOI ||
+                            (toi == best.TOI && ball.Id < best.BallA))
+                        {
+                            best = new TOIResult
+                            {
+                                Hit        = true,
+                                TOI        = toi,
+                                BallA      = ball.Id,
+                                Segment    = pocket.RimSegment,
+                                HitNormal  = hitNormal,
+                                HitPoint   = hitPoint,
+                                IsBallBall = false
+                            };
+                        }
+                    }
+                }
             }
 
             return best;
