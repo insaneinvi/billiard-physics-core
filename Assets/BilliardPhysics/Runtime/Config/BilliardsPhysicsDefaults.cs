@@ -7,13 +7,6 @@ namespace BilliardPhysics
     public static class BilliardsPhysicsDefaults
     {
         /// <summary>
-        /// Additional rolling-resistance coefficient for the table surface (dimensionless).
-        /// Represents a typical cloth-covered slate table.
-        /// Typical useful range: 0.005–0.05.
-        /// </summary>
-        public static readonly Fix64 PhysicsWorld2D_TableFriction = Fix64.Zero;
-
-        /// <summary>
         /// Standard billiard ball radius in millimetres (mm).
         /// Matches the World Pool-Billiard Association spec: diameter = 57.15 mm.
         /// </summary>
