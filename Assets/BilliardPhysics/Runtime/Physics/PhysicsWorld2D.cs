@@ -48,6 +48,12 @@ namespace BilliardPhysics
         // enough that it does not visibly affect the simulation at 60 Hz.
         private static readonly Fix64 CollisionEpsilon = Fix64.From(1) / Fix64.From(100000);
 
+        // Safety margin added to the ball–cushion positional push-out to ensure the ball
+        // ends up just outside (not on) the cushion surface after correction.
+        // 0.01 mm is large enough to clear fixed-point rounding error (radii ≈ 28.6 mm)
+        // but small enough to be visually imperceptible.
+        private static readonly Fix64 PushOutSlop = Fix64.From(1) / Fix64.From(100);
+
         // ── Performance stats (updated each Step call) ────────────────────────────
 
         /// <summary>
@@ -141,8 +147,23 @@ namespace BilliardPhysics
                 {
                     Ball ball = FindBallById(result.BallA);
                     if (ball != null)
+                    {
                         ImpulseResolver.ResolveBallCushion(ball, result.HitNormal,
                             result.Segment != null ? result.Segment.Restitution : Fix64.One);
+
+                        // Positional push-out: correct any interpenetration introduced by
+                        // fixed-point rounding when advancing the ball to the TOI position.
+                        // Without this the ball can remain slightly inside the cushion surface,
+                        // causing subsequent CCD steps to miss the contact and allow tunnelling.
+                        FixVec2 dp   = ball.Position - result.HitPoint;
+                        Fix64   dist = dp.Magnitude;
+                        if (dist < ball.Radius)
+                        {
+                            // Use dp.Normalized if non-degenerate; fall back to HitNormal.
+                            FixVec2 pushDir = dist > Fix64.Zero ? dp.Normalized : result.HitNormal;
+                            ball.Position += pushDir * (ball.Radius - dist + PushOutSlop);
+                        }
+                    }
                 }
 
                 // Consume advance time plus a small safety margin.

@@ -1105,5 +1105,60 @@ namespace BilliardPhysics.Tests
             Assert.IsTrue(distAC >= radSum - tolerance,
                 $"A-C must not persistently overlap: dist={distAC.ToFloat():F3}, radSum={radSum.ToFloat():F3}");
         }
+
+        // ── Regression: cushion positional push-out prevents tunnelling ────────────
+
+        /// <summary>
+        /// EditMode regression test: a ball bouncing inside a simple rectangular table
+        /// must never escape the table bounds. This validates the ball–cushion positional
+        /// push-out added to <see cref="PhysicsWorld2D.Step"/>: without it, fixed-point
+        /// rounding at the TOI position can leave the ball slightly inside the cushion,
+        /// causing subsequent CCD steps to miss the contact and allow the ball to tunnel
+        /// through the wall.
+        ///
+        /// Table layout (2000 × 1000 mm, origin at centre):
+        ///   Left  wall: x = −1000, inward normal = +X
+        ///   Right wall: x = +1000, inward normal = −X
+        ///   Bottom wall: y = −500, inward normal = +Y
+        ///   Top   wall: y = +500,  inward normal = −Y
+        ///
+        /// Each segment is wound so its left-hand perpendicular faces the table interior.
+        /// </summary>
+        [Test]
+        public void Step_BallBouncingInRectangularTable_NeverLeavesTableBounds()
+        {
+            Fix64 halfW = Fix64.From(1000);
+            Fix64 halfH = Fix64.From(500);
+
+            // Left wall  (x = -halfW): from top to bottom so normal points +X (inward).
+            var left   = new Segment(new FixVec2(-halfW,  halfH), new FixVec2(-halfW, -halfH));
+            // Right wall (x = +halfW): from bottom to top so normal points -X (inward).
+            var right  = new Segment(new FixVec2( halfW, -halfH), new FixVec2( halfW,  halfH));
+            // Bottom wall (y = -halfH): from left to right so normal points +Y (inward).
+            var bottom = new Segment(new FixVec2(-halfW, -halfH), new FixVec2( halfW, -halfH));
+            // Top wall   (y = +halfH): from right to left so normal points -Y (inward).
+            var top    = new Segment(new FixVec2( halfW,  halfH), new FixVec2(-halfW,  halfH));
+
+            var world = new PhysicsWorld2D();
+            world.SetTableSegments(new[] { left, right, bottom, top });
+
+            var ball = new Ball(0);
+            // Start near the bottom-left corner, aimed diagonally to induce many bounces.
+            ball.Position       = new FixVec2(Fix64.From(-900), Fix64.From(-400));
+            ball.LinearVelocity = new FixVec2(Fix64.From(800),  Fix64.From(600));
+            world.AddBall(ball);
+
+            // Simulate ~5 seconds (300 steps at 1/60 s); assert the ball stays in-bounds.
+            for (int step = 0; step < 300; step++)
+            {
+                world.Step();
+                if (ball.IsMotionless) break;
+
+                Assert.IsTrue(ball.Position.X >= -halfW && ball.Position.X <= halfW,
+                    $"Ball escaped table in X at step {step}: x={ball.Position.X.ToFloat():F3}");
+                Assert.IsTrue(ball.Position.Y >= -halfH && ball.Position.Y <= halfH,
+                    $"Ball escaped table in Y at step {step}: y={ball.Position.Y.ToFloat():F3}");
+            }
+        }
     }
 }
