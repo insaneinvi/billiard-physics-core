@@ -29,7 +29,7 @@ namespace BilliardPhysics
         /// <param name="dt">Time step in seconds.</param>
         /// <param name="tableFriction">
         /// Additional rolling-resistance coefficient contributed by the table surface
-        /// (see <see cref="PhysicsWorld2D.TableFriction"/>).  Default = 0 (no extra friction).
+        /// (dimensionless).  Pass <c>Fix64.Zero</c> for no extra friction.
         /// During the rolling phase this is added to <see cref="Ball.RollingFriction"/> to
         /// increase linear-velocity decay; the rolling-contact constraint
         /// (<c>ω.Y = +Lv.X / R</c>) then automatically couples the linear deceleration
