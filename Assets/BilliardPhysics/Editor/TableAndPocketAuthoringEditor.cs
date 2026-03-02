@@ -38,6 +38,8 @@ namespace BilliardPhysics.Editor
 
         // Threshold for treating a segment as degenerate (squared length).
         private const float k_minSegLenSq = 1e-6f;
+        // Factor used by the Scale Down ÷100 operation.
+        private const float k_scaleDownFactor = 0.01f;
         // Fallback direction used when a segment is degenerate.
         private static readonly Vector2 k_defaultSegDir = Vector2.right;
 
@@ -285,6 +287,26 @@ namespace BilliardPhysics.Editor
                 }
             }
 
+            if (GUILayout.Button("Scale Down \u00f7100"))
+            {
+                bool confirmed = EditorUtility.DisplayDialog(
+                    "Scale Down \u00f7100",
+                    "This will divide all table/pocket coordinates and pocket radii by 100.\n\nThis operation is applied in-place and can be undone.",
+                    "Apply",
+                    "Cancel");
+                if (confirmed)
+                {
+                    var auth = (TableAndPocketAuthoring)target;
+                    Undo.RecordObject(target, "Scale Down \u00f7100");
+                    ScaleTableConfig(auth.Table);
+                    if (auth.Pockets != null)
+                        foreach (var pocket in auth.Pockets)
+                            ScalePocketConfig(pocket);
+                    EditorUtility.SetDirty(target);
+                    SceneView.RepaintAll();
+                }
+            }
+
             // ── Fixed-Point Binary Export / Import ────────────────────────
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Export / Import", EditorStyles.boldLabel);
@@ -326,6 +348,32 @@ namespace BilliardPhysics.Editor
             if (pocket == null) return;
             pocket.Center = RotateLeft90TranslateX(pocket.Center);
             TransformSegmentData(pocket.RimSegments);
+        }
+
+        // ── Scale Down ÷100 Helpers ───────────────────────────────────────
+        private static void ScaleSegmentData(SegmentData seg)
+        {
+            if (seg == null) return;
+            seg.Start = seg.Start * k_scaleDownFactor;
+            seg.End   = seg.End   * k_scaleDownFactor;
+            if (seg.ConnectionPoints != null)
+                for (int i = 0; i < seg.ConnectionPoints.Count; i++)
+                    seg.ConnectionPoints[i] = seg.ConnectionPoints[i] * k_scaleDownFactor;
+        }
+
+        private static void ScaleTableConfig(TableConfig table)
+        {
+            if (table?.Segments == null) return;
+            foreach (var seg in table.Segments)
+                ScaleSegmentData(seg);
+        }
+
+        private static void ScalePocketConfig(PocketConfig pocket)
+        {
+            if (pocket == null) return;
+            pocket.Center = pocket.Center * k_scaleDownFactor;
+            pocket.Radius = pocket.Radius * k_scaleDownFactor;
+            ScaleSegmentData(pocket.RimSegments);
         }
 
         // ── Fixed-Point Binary Export ──────────────────────────────────────
