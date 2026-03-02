@@ -9,8 +9,11 @@ namespace BilliardPhysics
     /// </summary>
     public static class MotionSimulator
     {
-        /// <summary>Gravitational deceleration used to scale friction forces (units/s²).</summary>
-        public static readonly Fix64 Gravity = Fix64.From(9);
+        /// <summary>
+        /// Gravitational acceleration used to scale friction forces (mm/s²).
+        /// 9.8 m/s² = 9800 mm/s², matching the mm/g/s unit system used throughout.
+        /// </summary>
+        public static readonly Fix64 Gravity = Fix64.From(9800);
 
         // Velocity / angular-velocity magnitude below which we treat the quantity as zero.
         private static readonly Fix64 Epsilon = Fix64.From(1) / Fix64.From(1000);
