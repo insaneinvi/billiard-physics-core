@@ -2,6 +2,23 @@ namespace BilliardPhysics
 {
     public static class ImpulseResolver
     {
+        // ── Positional-correction parameters ─────────────────────────────────────
+
+        /// <summary>
+        /// Minimum penetration depth (in physics units) that triggers positional
+        /// correction.  Overlaps smaller than this value are ignored to avoid
+        /// jitter from fixed-point rounding.
+        /// Ball radius is ~28.6 units, so 0.1 units ≈ 0.35 % of R.
+        /// </summary>
+        public static Fix64 PenetrationSlop = Fix64.FromFloat(0.1f);
+
+        /// <summary>
+        /// Fraction of the excess penetration (beyond <see cref="PenetrationSlop"/>)
+        /// that is corrected per resolution call.  Values near 1 give fast correction
+        /// but may introduce visible position pops; 0.8 is a stable default.
+        /// </summary>
+        public static Fix64 CorrectionPercent = Fix64.From(8) / Fix64.From(10);  // 0.8
+
         // ── Ball–ball collision ───────────────────────────────────────────────────
 
         public static void ResolveBallBall(Ball a, Ball b)
@@ -16,7 +33,9 @@ namespace BilliardPhysics
             FixVec2 rb = -n * b.Radius;
 
             // Velocity at contact point (linear + angular contribution).
-            // In Z-down frame, ω × r for an in-plane r reduces to ω.Z * r.Perp().
+            // ω × r for an in-plane r = (rx, ry, 0) reduces to ω.Z * r.Perp()
+            // regardless of Z convention (Z-up or Z-down), since only the Z
+            // component of ω contributes to the XY contact velocity.
             FixVec2 va_contact = a.LinearVelocity + a.AngularVelocity.Z * ra.Perp();
             FixVec2 vb_contact = b.LinearVelocity + b.AngularVelocity.Z * rb.Perp();
             FixVec2 v_rel      = va_contact - vb_contact;
@@ -65,6 +84,24 @@ namespace BilliardPhysics
             b.LinearVelocity    -= tangent *  (jt / b.Mass);
             a.AngularVelocity.Z += raPerpDotT * jt / a.Inertia;
             b.AngularVelocity.Z -= rbPerpDotT * jt / b.Inertia;
+
+            // ── Positional correction (linear projection) ─────────────────────────
+            // Prevent persistent interpenetration by directly nudging ball centres
+            // apart when overlap exceeds PenetrationSlop.  Correction is split
+            // proportionally by inverse mass so that lighter balls move more.
+            Fix64 dist        = FixVec2.Distance(a.Position, b.Position);
+            Fix64 penetration = a.Radius + b.Radius - dist;
+
+            if (penetration > PenetrationSlop)
+            {
+                Fix64   invMassA   = Fix64.One / a.Mass;
+                Fix64   invMassB   = Fix64.One / b.Mass;
+                Fix64   totalInv   = invMassA + invMassB;
+                Fix64   corrMag    = (penetration - PenetrationSlop) * CorrectionPercent / totalInv;
+                FixVec2 correction = n * corrMag;
+                a.Position -= correction * invMassA;
+                b.Position += correction * invMassB;
+            }
         }
 
         // ── Ball–cushion collision ────────────────────────────────────────────────
@@ -72,8 +109,24 @@ namespace BilliardPhysics
         /// <summary>
         /// Resolves a ball-cushion collision using the outward normal of the
         /// struck sub-segment (or vertex), as determined by CCD detection.
+        /// Delegates to the overload with <paramref name="segmentRestitution"/> = 1
+        /// (backwards-compatible; behaves identically to the original method).
         /// </summary>
         public static void ResolveBallCushion(Ball ball, FixVec2 hitNormal)
+            => ResolveBallCushion(ball, hitNormal, Fix64.One);
+
+        /// <summary>
+        /// Resolves a ball-cushion collision, blending the ball's own restitution
+        /// with the cushion segment's <paramref name="segmentRestitution"/>.
+        /// The effective restitution is <c>Min(ball.Restitution, segmentRestitution)</c>.
+        /// </summary>
+        /// <param name="ball">The ball that struck the cushion.</param>
+        /// <param name="hitNormal">Outward normal of the struck sub-segment or vertex.</param>
+        /// <param name="segmentRestitution">
+        /// Restitution of the struck <see cref="Segment"/> (0–1).
+        /// Use <see cref="Segment.Restitution"/> from the TOI result.
+        /// </param>
+        public static void ResolveBallCushion(Ball ball, FixVec2 hitNormal, Fix64 segmentRestitution)
         {
             FixVec2 n = hitNormal;
 
@@ -90,7 +143,9 @@ namespace BilliardPhysics
             Fix64   v_rel_n   = FixVec2.Dot(v_contact, n);
             if (v_rel_n >= Fix64.Zero) return;
 
-            Fix64 e          = ball.Restitution;
+            // Effective restitution: take the minimum of ball and cushion values so that
+            // setting either to 0 yields a fully inelastic normal response.
+            Fix64 e          = Fix64.Min(ball.Restitution, segmentRestitution);
             Fix64 rPerpDotN  = FixVec2.Dot(rPerp, n);
             Fix64 denomN     = Fix64.One / ball.Mass + rPerpDotN * rPerpDotN / ball.Inertia;
             Fix64 jn         = -(Fix64.One + e) * v_rel_n / denomN;

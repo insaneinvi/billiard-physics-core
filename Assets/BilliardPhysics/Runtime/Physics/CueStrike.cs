@@ -7,7 +7,7 @@ namespace BilliardPhysics
     {
         /// <summary>
         /// Applies a cue strike to a ball, computing a physically correct 3D angular
-        /// velocity from the strike offset in the Z-down frame.
+        /// velocity from the strike offset in the Z-up frame.
         /// </summary>
         /// <param name="ball">Target ball.</param>
         /// <param name="direction">Normalized strike direction (XY plane).</param>
@@ -18,7 +18,8 @@ namespace BilliardPhysics
         /// </param>
         /// <param name="spinY">
         /// Vertical (top/back-spin) offset above ball centre (+Y = above = top-spin).
-        /// In the Z-down frame this corresponds to a −Z offset, driving ω.X/ω.Y.
+        /// In the Z-up frame (+Z away from table) this corresponds to a +Z offset,
+        /// driving ω.X/ω.Y so that positive spinY produces forward rolling spin.
         /// </param>
         public static void Apply(Ball ball, FixVec2 direction, Fix64 strength, Fix64 spinX, Fix64 spinY)
         {
@@ -28,20 +29,23 @@ namespace BilliardPhysics
             // Linear impulse J = strength * dir → velocity change Δv = J / m.
             ball.LinearVelocity = dir * strength / ball.Mass;
 
-            // 3D angular velocity from strike offset:
-            //   offset = spinX * perp + spinY * (-Z)   (perp = dir.Perp(); -Z = above in Z-down)
-            //          = (spinX*perp.X, spinX*perp.Y, -spinY)
+            // 3D angular velocity from strike offset (Z-up frame):
+            //   offset = spinX * perp + spinY * (+Z)   (perp = dir.Perp(); +Z = above in Z-up)
+            //          = (spinX*perp.X, spinX*perp.Y, +spinY)
             //   J3     = (strength*dir.X, strength*dir.Y, 0)
             //   Δω     = I⁻¹ · (offset × J3)
             //
             // Expanded (with perp = (-dir.Y, dir.X) and |dir|=1):
-            //   Δω.X = +spinY * strength * dir.Y / I
-            //   Δω.Y = −spinY * strength * dir.X / I
+            //   Δω.X = −spinY * strength * dir.Y / I
+            //   Δω.Y = +spinY * strength * dir.X / I
             //   Δω.Z = −spinX * strength          / I
+            //
+            // Sign check: for dir=(1,0), spinY>0 (top-spin) →
+            //   Δω.Y = +spinY*strength/I > 0, matching rolling constraint ω.Y = +v.X/R.
             Fix64 invI = Fix64.One / ball.Inertia;
             ball.AngularVelocity = new FixVec3(
-                 spinY * strength * dir.Y * invI,
-                -spinY * strength * dir.X * invI,
+                -spinY * strength * dir.Y * invI,
+                +spinY * strength * dir.X * invI,
                 -spinX * strength          * invI);
         }
     }

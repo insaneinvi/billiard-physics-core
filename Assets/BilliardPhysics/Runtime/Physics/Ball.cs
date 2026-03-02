@@ -1,5 +1,3 @@
-using UnityEngine;
-
 namespace BilliardPhysics
 {
     public class Ball
@@ -11,21 +9,14 @@ namespace BilliardPhysics
         public FixVec2    Position;
         public FixVec2    LinearVelocity;
         /// <summary>
-        /// 3D angular velocity (rad/s) in the Z-down frame.
+        /// 3D angular velocity (rad/s) in the physics coordinate system (Z-up:
+        /// +Z points away from the table; table normal = (0,0,+1)).
         /// X/Y components drive rolling (coupled to linear motion via table friction).
         /// Z component is side-spin (english); decays via SpinFriction.
         /// </summary>
         public FixVec3    AngularVelocity;
         public bool       IsMotionless;
         public bool       IsPocketed;
-
-        // ── Rendering ─────────────────────────────────────────────────────────────
-        /// <summary>
-        /// 3D orientation for rendering. Updated each simulation step by integrating
-        /// AngularVelocity (rad/s) around the ω direction (not fixed to any axis).
-        /// Coordinate convention: Z-down; table normal n = (0,0,-1).
-        /// </summary>
-        public Quaternion Rotation = Quaternion.identity;
 
         // ── Physical parameters ───────────────────────────────────────────────────
         public Fix64 Radius;
@@ -70,7 +61,6 @@ namespace BilliardPhysics
             AngularVelocity = FixVec3.Zero;
             IsMotionless    = true;
             IsPocketed      = false;
-            Rotation        = Quaternion.identity;
         }
     }
 }

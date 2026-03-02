@@ -1,21 +1,43 @@
-using UnityEngine;
-
 namespace BilliardPhysics
 {
     /// <summary>
     /// Advances ball linear and angular motion under friction, without resolving collisions.
-    /// Coordinate convention: Z-down (table normal n = (0,0,-1)).
-    /// Ball center-to-contact-point vector: r = (0, 0, +Radius) (points in +Z).
+    /// Coordinate convention: Z-up (+Z points away from the table; table normal n = (0,0,+1)).
+    /// Ball center-to-contact-point vector: r = (0, 0, -Radius) (points in -Z, i.e. downward).
+    /// Use <see cref="BilliardPhysics.Runtime.ViewTool.PhysicsToView.IntegrateRotation"/> to
+    /// convert AngularVelocity into a Unity transform.rotation each frame.
     /// </summary>
     public static class MotionSimulator
     {
-        /// <summary>Gravitational deceleration used to scale friction forces (units/s²).</summary>
-        public static readonly Fix64 Gravity = Fix64.From(9);
+        /// <summary>
+        /// Gravitational acceleration used to scale friction forces (mm/s²).
+        /// 9.8 m/s² = 9800 mm/s², matching the mm/g/s unit system used throughout.
+        /// </summary>
+        public static readonly Fix64 Gravity = Fix64.From(9800);
 
         // Velocity / angular-velocity magnitude below which we treat the quantity as zero.
         private static readonly Fix64 Epsilon = Fix64.From(1) / Fix64.From(1000);
 
         public static void Step(Ball ball, Fix64 dt)
+            => Step(ball, dt, Fix64.Zero);
+
+        /// <summary>
+        /// Advances ball state by <paramref name="dt"/> seconds, applying table-surface
+        /// friction in addition to per-ball friction coefficients.
+        /// </summary>
+        /// <param name="ball">The ball to advance.</param>
+        /// <param name="dt">Time step in seconds.</param>
+        /// <param name="tableFriction">
+        /// Additional rolling-resistance coefficient contributed by the table surface
+        /// (see <see cref="PhysicsWorld2D.TableFriction"/>).  Default = 0 (no extra friction).
+        /// During the rolling phase this is added to <see cref="Ball.RollingFriction"/> to
+        /// increase linear-velocity decay; the rolling-contact constraint
+        /// (<c>ω.Y = +Lv.X / R</c>) then automatically couples the linear deceleration
+        /// into a proportional change of the Y-axis angular velocity.
+        /// During the sliding phase this is added to <see cref="Ball.SlidingFriction"/>
+        /// so that the translation-to-rotation impulse is also proportionally larger.
+        /// </param>
+        public static void Step(Ball ball, Fix64 dt, Fix64 tableFriction)
         {
             if (ball.IsPocketed) return;
 
@@ -38,11 +60,11 @@ namespace BilliardPhysics
             Fix64 invInertia = Fix64.One / ball.Inertia;
 
             // ── Ball-table friction coupling (sliding → rolling) ───────────────────
-            // r = (0, 0, R)  [contact point from ball center; +Z is down in Z-down frame]
-            // ω × r = (ω.Y*R, -ω.X*R, 0)
-            // Tangential slip at contact: v_t = (Lv.X + ω.Y*R,  Lv.Y - ω.X*R)
-            Fix64 vtX = ball.LinearVelocity.X + ball.AngularVelocity.Y * R;
-            Fix64 vtY = ball.LinearVelocity.Y - ball.AngularVelocity.X * R;
+            // r = (0, 0, -R)  [contact point from ball center; -Z is down in Z-up frame]
+            // ω × r = (-ω.Y*R, ω.X*R, 0)
+            // Tangential slip at contact: v_t = (Lv.X - ω.Y*R,  Lv.Y + ω.X*R)
+            Fix64 vtX = ball.LinearVelocity.X - ball.AngularVelocity.Y * R;
+            Fix64 vtY = ball.LinearVelocity.Y + ball.AngularVelocity.X * R;
             Fix64 slip = Fix64.Sqrt(vtX * vtX + vtY * vtY);
 
             if (slip > Epsilon)
@@ -53,8 +75,10 @@ namespace BilliardPhysics
                              (ball.Mass * R * R + ball.Inertia);
 
                 // Coulomb limit: μ * m * g * dt; cap so we never over-correct.
+                // tableFriction adds to the effective sliding coefficient so that table
+                // surface friction contributes to the translation-to-rotation coupling.
                 Fix64 jZero = slip * mEff;
-                Fix64 jMax  = ball.SlidingFriction * ball.Mass * Gravity * dt;
+                Fix64 jMax  = (ball.SlidingFriction + tableFriction) * ball.Mass * Gravity * dt;
                 Fix64 jMag  = Fix64.Min(jZero, jMax);
 
                 // Friction impulse direction: opposing the slip.
@@ -68,9 +92,9 @@ namespace BilliardPhysics
                     ball.LinearVelocity.Y + jy * invMass);
 
                 // Update angular velocity: Δω = I⁻¹ · (r × J)
-                // r × J = (0,0,R) × (jx,jy,0) = (-R·jy, R·jx, 0)
-                ball.AngularVelocity.X += -R * jy * invInertia;
-                ball.AngularVelocity.Y +=  R * jx * invInertia;
+                // r × J = (0,0,-R) × (jx,jy,0) = (R·jy, -R·jx, 0)
+                ball.AngularVelocity.X += +R * jy * invInertia;
+                ball.AngularVelocity.Y += -R * jx * invInertia;
                 // ω.Z is unaffected by table-normal friction (torque has no Z component).
             }
 
@@ -84,8 +108,8 @@ namespace BilliardPhysics
 
             // ── Rolling friction: decelerate once contact slip ≈ 0 ────────────────
             // Recompute slip with the updated angular velocity.
-            Fix64 vtX2   = ball.LinearVelocity.X + ball.AngularVelocity.Y * R;
-            Fix64 vtY2   = ball.LinearVelocity.Y - ball.AngularVelocity.X * R;
+            Fix64 vtX2   = ball.LinearVelocity.X - ball.AngularVelocity.Y * R;
+            Fix64 vtY2   = ball.LinearVelocity.Y + ball.AngularVelocity.X * R;
             Fix64 newSlip = Fix64.Sqrt(vtX2 * vtX2 + vtY2 * vtY2);
             speed         = ball.LinearVelocity.Magnitude;
 
@@ -94,7 +118,10 @@ namespace BilliardPhysics
                 if (speed > Epsilon)
                 {
                     // Pure rolling: apply rolling resistance to linear velocity.
-                    Fix64 rollingDecel = ball.RollingFriction * Gravity;
+                    // tableFriction is added to ball.RollingFriction here; the rolling
+                    // constraint (ω.Y = +Lv.X / R) couples this deceleration into a
+                    // proportional change of the Y-axis angular velocity automatically.
+                    Fix64 rollingDecel = (ball.RollingFriction + tableFriction) * Gravity;
                     Fix64 decelDt      = rollingDecel * dt;
 
                     if (speed <= decelDt)
@@ -109,10 +136,10 @@ namespace BilliardPhysics
                         ball.LinearVelocity -= dir * decelDt;
 
                         // Keep XY angular components in sync with linear velocity.
-                        // Rolling condition: Lv.X = -ω.Y*R, Lv.Y = ω.X*R
+                        // Rolling condition: Lv.X = ω.Y*R, Lv.Y = -ω.X*R
                         Fix64 invR = Fix64.One / R;
-                        ball.AngularVelocity.Y = -ball.LinearVelocity.X * invR;
-                        ball.AngularVelocity.X =  ball.LinearVelocity.Y * invR;
+                        ball.AngularVelocity.Y =  ball.LinearVelocity.X * invR;
+                        ball.AngularVelocity.X = -ball.LinearVelocity.Y * invR;
                     }
                 }
                 else
@@ -131,18 +158,6 @@ namespace BilliardPhysics
 
             // ── Integrate position ────────────────────────────────────────────────
             ball.Position += ball.LinearVelocity * dt;
-
-            // ── Integrate rotation ────────────────────────────────────────────────
-            // Rotation axis = ω / |ω|; angle increment = |ω| * dt  (rad).
-            // Unlike the old code, the axis is NOT fixed to Z; it follows ω direction.
-            Fix64 omegaMag = ball.AngularVelocity.Magnitude;
-            if (omegaMag > Epsilon)
-            {
-                FixVec3 axis     = ball.AngularVelocity / omegaMag;
-                float   angleDeg = omegaMag.ToFloat() * dt.ToFloat() * UnityEngine.Mathf.Rad2Deg;
-                var     axisV3   = new UnityEngine.Vector3(axis.X.ToFloat(), axis.Y.ToFloat(), axis.Z.ToFloat());
-                ball.Rotation    = (UnityEngine.Quaternion.AngleAxis(angleDeg, axisV3) * ball.Rotation).normalized;
-            }
         }
     }
 }
