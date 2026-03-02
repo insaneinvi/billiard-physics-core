@@ -45,7 +45,7 @@ namespace BilliardPhysics
             Fix64 invI = Fix64.One / ball.Inertia;
             ball.AngularVelocity = new FixVec3(
                 -spinY * strength * dir.Y * invI,
-                +spinY * strength * dir.X * invI,
+                spinY * strength * dir.X * invI,
                 -spinX * strength          * invI);
         }
     }

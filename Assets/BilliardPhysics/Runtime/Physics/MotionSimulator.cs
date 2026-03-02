@@ -18,9 +18,6 @@ namespace BilliardPhysics
         // Velocity / angular-velocity magnitude below which we treat the quantity as zero.
         private static readonly Fix64 Epsilon = Fix64.From(1) / Fix64.From(1000);
 
-        public static void Step(Ball ball, Fix64 dt)
-            => Step(ball, dt, Fix64.Zero);
-
         /// <summary>
         /// Advances ball state by <paramref name="dt"/> seconds, applying table-surface
         /// friction in addition to per-ball friction coefficients.
@@ -37,7 +34,7 @@ namespace BilliardPhysics
         /// During the sliding phase this is added to <see cref="Ball.SlidingFriction"/>
         /// so that the translation-to-rotation impulse is also proportionally larger.
         /// </param>
-        public static void Step(Ball ball, Fix64 dt, Fix64 tableFriction)
+        public static void Step(Ball ball, Fix64 dt)
         {
             if (ball.IsPocketed) return;
 
@@ -78,7 +75,7 @@ namespace BilliardPhysics
                 // tableFriction adds to the effective sliding coefficient so that table
                 // surface friction contributes to the translation-to-rotation coupling.
                 Fix64 jZero = slip * mEff;
-                Fix64 jMax  = (ball.SlidingFriction + tableFriction) * ball.Mass * Gravity * dt;
+                Fix64 jMax  = ball.SlidingFriction * ball.Mass * Gravity * dt;
                 Fix64 jMag  = Fix64.Min(jZero, jMax);
 
                 // Friction impulse direction: opposing the slip.
@@ -93,7 +90,7 @@ namespace BilliardPhysics
 
                 // Update angular velocity: Δω = I⁻¹ · (r × J)
                 // r × J = (0,0,-R) × (jx,jy,0) = (R·jy, -R·jx, 0)
-                ball.AngularVelocity.X += +R * jy * invInertia;
+                ball.AngularVelocity.X += R * jy * invInertia;
                 ball.AngularVelocity.Y += -R * jx * invInertia;
                 // ω.Z is unaffected by table-normal friction (torque has no Z component).
             }
@@ -121,7 +118,7 @@ namespace BilliardPhysics
                     // tableFriction is added to ball.RollingFriction here; the rolling
                     // constraint (ω.Y = +Lv.X / R) couples this deceleration into a
                     // proportional change of the Y-axis angular velocity automatically.
-                    Fix64 rollingDecel = (ball.RollingFriction + tableFriction) * Gravity;
+                    Fix64 rollingDecel = ball.RollingFriction * Gravity;
                     Fix64 decelDt      = rollingDecel * dt;
 
                     if (speed <= decelDt)

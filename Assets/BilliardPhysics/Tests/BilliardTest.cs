@@ -30,17 +30,17 @@ public class BilliardTest : MonoBehaviour
         var stepInterval = 1 / 60f;
         Time.fixedDeltaTime = stepInterval;
         
-        var debug = new PhysicsWorld2DDebug();
-        debug.SetTableGeometry(_physicsWorld.TableSegments, _physicsWorld.Pockets);
-        debug.SetBalls(_physicsWorld.Balls);
-        debug.SetDebug(true);
-        pDebug = debug;
+        // var debug = new PhysicsWorld2DDebug();
+        // debug.SetTableGeometry(_physicsWorld.TableSegments, _physicsWorld.Pockets);
+        // debug.SetBalls(_physicsWorld.Balls);
+        // debug.SetDebug(true);
+        // pDebug = debug;
     }
 
     private PhysicsWorld2DDebug pDebug;
     private void OnDestroy()
     {
-        pDebug.Dispose();
+        // pDebug.Dispose();
     }
 
     private void InitViewWorld(RackResult rackResult)
@@ -49,7 +49,7 @@ public class BilliardTest : MonoBehaviour
         ballShadowDict = new();
         _ballRotations = new();
         
-        ballTextures = Resources.LoadAll<Texture>("Temp/BallsTextures");
+        ballTextures = Resources.LoadAll<Texture>("Temps/BallsTextures");
         
         Array.Sort(ballTextures, (a, b) =>
         {
@@ -90,13 +90,17 @@ public class BilliardTest : MonoBehaviour
         var physicsData = Resources.Load<TextAsset>("Data/tb8h");
         var (tableSegments, pockets) = TableAndPocketBinaryLoader.Load(physicsData);
         _physicsWorld = new();
+        foreach (var tableSegment in tableSegments)
+        {
+            tableSegment.Restitution = BilliardsPhysicsDefaults.Segment_Restitution;
+        }
         _physicsWorld.SetTableSegments(tableSegments);
         foreach (var pocket in pockets)
         {
             _physicsWorld.AddPocket(pocket);
         }
 
-        cueBall = new Ball(0);
+        cueBall = new Ball(0, BilliardsPhysicsDefaults.Ball_Radius, BilliardsPhysicsDefaults.Ball_Mass);
         cueBall.Position = new FixVec2(Fix64.FromFloat(rackResult.CueBall.Position.x),  Fix64.FromFloat(rackResult.CueBall.Position.y));
         _physicsWorld.AddBall(cueBall);
         
@@ -106,6 +110,8 @@ public class BilliardTest : MonoBehaviour
             objBall.Position = new FixVec2(Fix64.FromFloat(ob.Position.x),  Fix64.FromFloat(ob.Position.y));
             _physicsWorld.AddBall(objBall);
         }
+
+        _physicsWorld.TableFriction = BilliardsPhysicsDefaults.PhysicsWorld2D_TableFriction;
     }
 
     private void FixedUpdate()
@@ -138,7 +144,7 @@ public class BilliardTest : MonoBehaviour
     {
         foreach (var physicsWorldBall in _physicsWorld.Balls)
         {
-            if (!physicsWorldBall.IsMotionless) return false;
+            if (!physicsWorldBall.IsPocketed && !physicsWorldBall.IsMotionless) return false;
         }
         return true;
     }

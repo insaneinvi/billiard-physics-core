@@ -39,7 +39,7 @@ namespace BilliardPhysics
             Id     = id;
             Radius = radius;
             Mass   = mass;
-
+   
             // Moment of inertia for a solid sphere: I = (2/5) * m * r^2
             Fix64 two   = Fix64.From(2);
             Fix64 five  = Fix64.From(5);
