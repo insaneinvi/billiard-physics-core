@@ -927,6 +927,48 @@ namespace BilliardPhysics.Tests
                 $"no-spin={slipNoSpin.ToFloat():F3}, top-spin={slipTopSpin.ToFloat():F3}");
         }
 
+        // ── Sliding → rolling transition (Gravity unit regression) ───────────────
+
+        /// <summary>
+        /// Regression test: a centre cue-ball hit (spinX = 0, spinY = 0) with
+        /// strength = 300 000 g·mm/s must transition from sliding to rolling within
+        /// 60 simulation steps (≈ 1 s at 60 Hz).
+        ///
+        /// Root cause of the original bug: <see cref="MotionSimulator.Gravity"/> was
+        /// set to 9 (mm/s²) instead of 9800 (mm/s²), making friction impulses ~1 000×
+        /// too small and causing the ball to slide indefinitely.
+        ///
+        /// Expected behaviour:
+        ///   • Initial ω.Y = 0 (centre hit applies no spin).
+        ///   • ω.Y grows positive (correct rolling direction for +X motion).
+        ///   • |v.X − ω.Y·R| < Epsilon within ≤ 60 steps.
+        /// </summary>
+        [Test]
+        public void CueStrike_CenterHitPlusX_TransitionsToRollingWithinOneSecond()
+        {
+            var ball    = new Ball(0);
+            FixVec2 dir = new FixVec2(Fix64.One, Fix64.Zero).Normalized;
+            Fix64 strength = Fix64.From(300000);
+
+            CueStrike.Apply(ball, dir, strength, Fix64.Zero, Fix64.Zero);
+
+            // Centre hit must start with no angular velocity.
+            Assert.AreEqual(Fix64.Zero, ball.AngularVelocity.Y,
+                "Centre hit must not impart initial spin (ω.Y must be 0).");
+
+            Fix64 dt = Fix64.One / Fix64.From(60);
+            bool reached = AdvanceToRolling(ball, 60, dt, out int steps);
+
+            Assert.IsTrue(reached,
+                $"Ball must reach rolling within 60 steps (1 s at 60 Hz); " +
+                $"did not converge in {steps} steps. " +
+                $"Check MotionSimulator.Gravity is 9800 mm/s², not 9 mm/s².");
+
+            // After rolling is established, ω.Y must be positive (rolling in +X direction).
+            Assert.IsTrue(ball.AngularVelocity.Y > Fix64.Zero,
+                $"ω.Y must be positive for rolling in +X; got {ball.AngularVelocity.Y.ToFloat():F4}");
+        }
+
         // ── Positional correction: persistent interpenetration fix ────────────────
 
         /// <summary>
