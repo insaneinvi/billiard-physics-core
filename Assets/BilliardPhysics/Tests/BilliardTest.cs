@@ -98,6 +98,7 @@ public class BilliardTest : MonoBehaviour
         _physicsWorld.SetTableSegments(tableSegments);
         foreach (var pocket in pockets)
         {
+            pocket.RimSegment.Restitution = BilliardsPhysicsDefaults.PocketRimRestitution;
             _physicsWorld.AddPocket(pocket);
         }
 

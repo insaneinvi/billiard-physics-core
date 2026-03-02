@@ -19,14 +19,6 @@ namespace BilliardPhysics
 
         private const int MaxSubSteps = 20;
 
-        /// <summary>
-        /// Additional rolling-resistance coefficient contributed by the table cloth surface.
-        /// Passed directly to <see cref="MotionSimulator.Step"/> each substep.
-        /// Set to <see cref="BilliardsPhysicsDefaults.PhysicsWorld2D_TableFriction"/> for
-        /// a realistic cloth drag; zero means no extra table friction beyond per-ball values.
-        /// </summary>
-        public Fix64 TableFriction { get; set; } = Fix64.Zero;
-
         private static readonly Fix64 CaptureRadiusFactor = Fix64.One;
         // A factor of 1 means the ball is captured as soon as its centre enters
         // the full pocket radius.  Formerly 0.5 (half radius), which was too restrictive.
@@ -111,7 +103,7 @@ namespace BilliardPhysics
                 {
                     // No collision: advance all balls for the full remaining time.
                     foreach (Ball ball in _balls)
-                        MotionSimulator.Step(ball, remainingTime, TableFriction);
+                        MotionSimulator.Step(ball, remainingTime);
                     CheckPocketCaptures();
                     break;
                 }
@@ -121,7 +113,7 @@ namespace BilliardPhysics
                 if (advanceTime > Fix64.Zero)
                 {
                     foreach (Ball ball in _balls)
-                        MotionSimulator.Step(ball, advanceTime, TableFriction);
+                        MotionSimulator.Step(ball, advanceTime);
                 }
 
                 // Resolve the collision.

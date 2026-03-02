@@ -23,7 +23,7 @@ namespace BilliardPhysics
         /// Combined with the ball's own restitution via the minimum of both values.
         /// </summary>
         public static readonly Fix64 Segment_Restitution = Fix64.FromFloat(0.75f, 4);
-
+        
         /// <summary>
         /// Minimum cue-strike strength (linear impulse, in g·mm/s).
         /// For <see cref="Ball_Mass"/> = 170 g, this corresponds to Δv ≈ 0.5 m/s (500 mm/s):
