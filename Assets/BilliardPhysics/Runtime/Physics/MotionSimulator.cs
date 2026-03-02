@@ -16,7 +16,9 @@ namespace BilliardPhysics
         public static readonly Fix64 Gravity = Fix64.From(9800);
 
         // Velocity / angular-velocity magnitude below which we treat the quantity as zero.
-        private static readonly Fix64 Epsilon = Fix64.From(1) / Fix64.From(1000);
+        // Public so that other physics systems (e.g. PhysicsWorld2D) can apply the same
+        // slip threshold when checking pre-collision rolling state.
+        public static readonly Fix64 Epsilon = Fix64.From(1) / Fix64.From(1000);
 
         /// <summary>
         /// Advances ball state by <paramref name="dt"/> seconds, applying table-surface
