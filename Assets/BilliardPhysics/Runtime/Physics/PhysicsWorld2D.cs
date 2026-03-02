@@ -129,8 +129,34 @@ namespace BilliardPhysics
                     Ball ball = FindBallById(result.BallA);
                     if (ball != null)
                     {
+                        // Determine pre-collision pure-rolling state.
+                        // slip = |(v.X − ω.Y·R,  v.Y + ω.X·R)| : tangential contact velocity.
+                        Fix64 R             = ball.Radius;
+                        bool  wasPureRolling = false;
+                        if (R > Fix64.Zero)
+                        {
+                            Fix64 vtX = ball.LinearVelocity.X - ball.AngularVelocity.Y * R;
+                            Fix64 vtY = ball.LinearVelocity.Y + ball.AngularVelocity.X * R;
+                            Fix64 slip = Fix64.Sqrt(vtX * vtX + vtY * vtY);
+                            wasPureRolling = slip <= MotionSimulator.Epsilon;
+                        }
+
                         ImpulseResolver.ResolveBallCushion(ball, result.HitNormal,
                             result.Segment != null ? result.Segment.Restitution : Fix64.One);
+
+                        // If the ball was in pure rolling state before the collision, project
+                        // AngularVelocity.X/Y onto the new linear velocity direction so that
+                        // the rolling constraint is satisfied immediately after the bounce.
+                        // Without this, residual X/Y angular velocity that is now misaligned
+                        // with the reflected linear velocity causes sliding-friction torque over
+                        // the next several steps, bending the post-bounce trajectory.
+                        // ω.Z (side spin) is intentionally left unchanged.
+                        if (wasPureRolling && R > Fix64.Zero)
+                        {
+                            Fix64 invR = Fix64.One / R;
+                            ball.AngularVelocity.Y =  ball.LinearVelocity.X * invR;
+                            ball.AngularVelocity.X = -ball.LinearVelocity.Y * invR;
+                        }
 
                         // Positional push-out: correct any interpenetration introduced by
                         // fixed-point rounding when advancing the ball to the TOI position.
