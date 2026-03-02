@@ -31,9 +31,9 @@ namespace BilliardPhysics
 
         // Safety margin added to the ball–cushion positional push-out to ensure the ball
         // ends up just outside (not on) the cushion surface after correction.
-        // 0.01 mm is large enough to clear fixed-point rounding error (radii ≈ 28.6 mm)
+        // 1e-5 m is large enough to clear fixed-point rounding error (radii ≈ 0.0286 m)
         // but small enough to be visually imperceptible.
-        private static readonly Fix64 PushOutSlop = Fix64.From(1) / Fix64.From(100);
+        private static readonly Fix64 PushOutSlop = Fix64.From(1) / Fix64.From(100000);
 
         // ── Performance stats (updated each Step call) ────────────────────────────
 

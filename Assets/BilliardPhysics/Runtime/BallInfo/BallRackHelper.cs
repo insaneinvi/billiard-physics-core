@@ -34,12 +34,12 @@ public class RackResult
 
 public static class BallRackHelper
 {
-    // ===== 桌参数（mm）=====
-    public const float TableLength = 2540f;
-    public const float TableWidth  = 1270f;
+    // ===== 桌参数（m）=====
+    public const float TableLength = 2.54f;
+    public const float TableWidth  = 1.27f;
 
-    const float BallDiameter = 57.15f;
-    const float Gap = 0.05f; // 避免初始重叠
+    const float BallDiameter = 0.05715f;
+    const float Gap = 0.00005f; // 避免初始重叠（原始值 0.05 mm，换算为 m：5e-5 m）
     const float Spacing = BallDiameter + Gap;
 
     const float ApexX = TableLength * 0.75f;
@@ -118,10 +118,10 @@ public static class BallRackHelper
     }
 
     // =========================================================
-    // 坐标转换：左旋90° + 右移1270mm
+    // 坐标转换：左旋90° + 右移1.27m
     // =========================================================
     // 公式：
-    // x' = 1270 - y
+    // x' = 1.27 - y
     // y' = x
     // =========================================================
     public static Vector3 RotateLeft90AndShift(Vector3 pos)
