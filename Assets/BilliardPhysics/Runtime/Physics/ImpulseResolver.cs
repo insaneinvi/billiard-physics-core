@@ -40,9 +40,12 @@ namespace BilliardPhysics
             FixVec2 vb_contact = b.LinearVelocity + b.AngularVelocity.Z * rb.Perp();
             FixVec2 v_rel      = va_contact - vb_contact;
 
+            // Sign convention: n points from a to b.
+            // v_rel = va_contact − vb_contact, so v_rel_n = Dot(v_rel, n) > 0 when
+            // a's contact point moves faster toward b than b moves away → approaching.
+            // Impulse must only be applied in this case; skip if separating (≤ 0).
             Fix64 v_rel_n = FixVec2.Dot(v_rel, n);
-            // n points from a to b; v_rel_n > 0 means a approaches b (collision).
-            if (v_rel_n <= Fix64.Zero) return;  // already separating
+            if (v_rel_n <= Fix64.Zero) return;  // balls are separating – no impulse
 
             Fix64 e = Fix64.Min(a.Restitution, b.Restitution);
 
@@ -65,7 +68,10 @@ namespace BilliardPhysics
             b.AngularVelocity.Z -= rbPerpDotN * j / b.Inertia;
 
             // ── Tangential (friction) impulse ─────────────────────────────────────
-            // Recalculate relative velocity with updated linear (angular unchanged here).
+            // The normal impulse above acts along n, which is perpendicular to tangent,
+            // so it does not change the tangential component of v_rel.  The angular
+            // velocities also remain unchanged (raPerpDotN = 0 because ra ∥ n).
+            // Therefore v_rel computed before the normal impulse is still valid here.
             FixVec2 tangent    = n.Perp();
             Fix64   v_rel_t    = FixVec2.Dot(v_rel, tangent);
             Fix64   raPerpDotT = FixVec2.Dot(raPerp, tangent);
