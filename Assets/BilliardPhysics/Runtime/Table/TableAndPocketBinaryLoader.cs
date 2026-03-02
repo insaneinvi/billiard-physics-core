@@ -139,6 +139,9 @@ namespace BilliardPhysics
                 FixVec2       rimEnd   = ReadFixVec2Safe(reader, $"pocket {i} rim segment end");
                 List<FixVec2> rimCps   = ReadConnectionPoints(reader, $"pocket {i} rim segment");
                 pocket.RimSegment = new Segment(rimStart, rimEnd, rimCps);
+                // Low restitution so that rim contact absorbs most of the ball's normal
+                // velocity, slowing it below PocketSinkSpeedThreshold before capture.
+                pocket.RimSegment.Restitution = BilliardsPhysicsDefaults.PocketRimRestitution;
 
                 pockets.Add(pocket);
             }

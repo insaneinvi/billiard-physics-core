@@ -37,5 +37,32 @@ namespace BilliardPhysics
         /// J_max = 8 000 mm/s × 170 g = 1 360 000 g·mm/s.
         /// </summary>
         public static readonly Fix64 ApplyCueStrike_StrengthMax = Fix64.From(1360000);
+
+        /// <summary>
+        /// Additional rolling-resistance coefficient contributed by the table cloth surface
+        /// (dimensionless).  Added to each ball's own <see cref="Ball.RollingFriction"/> and
+        /// <see cref="Ball.SlidingFriction"/> inside <see cref="MotionSimulator.Step"/>.
+        /// Zero means no extra table-cloth drag beyond the ball's own friction values.
+        /// </summary>
+        public static readonly Fix64 PhysicsWorld2D_TableFriction = Fix64.Zero;
+
+        /// <summary>
+        /// Ball speed threshold (mm/s) below which a ball whose centre is inside
+        /// a pocket's capture radius is considered pocketed (sunk).
+        /// Balls faster than this value pass through the pocket mouth without being
+        /// captured immediately; they must slow down (e.g. via rim collisions) first.
+        /// Default: 500 mm/s — the minimum cue-strike speed, so only truly slow/rolling
+        /// balls are captured without first bouncing off the pocket rim.
+        /// </summary>
+        public static readonly Fix64 PocketSinkSpeedThreshold = Fix64.From(500);
+
+        /// <summary>
+        /// Coefficient of restitution applied to a pocket's <see cref="Pocket.RimSegment"/>
+        /// (0–1).  A very low value (≈ 0.1) causes the ball to lose most of its normal
+        /// velocity on rim contact, simulating the energy-absorbing leather/rubber of a
+        /// real pocket jaw and slowing the ball enough to be captured on the next
+        /// <see cref="PhysicsWorld2D.CheckPocketCaptures"/> call.
+        /// </summary>
+        public static readonly Fix64 PocketRimRestitution = Fix64.FromFloat(0.1f, 4);
     }
 }

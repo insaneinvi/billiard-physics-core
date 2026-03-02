@@ -36,7 +36,7 @@ namespace BilliardPhysics
         /// During the sliding phase this is added to <see cref="Ball.SlidingFriction"/>
         /// so that the translation-to-rotation impulse is also proportionally larger.
         /// </param>
-        public static void Step(Ball ball, Fix64 dt)
+        public static void Step(Ball ball, Fix64 dt, Fix64 tableFriction = default)
         {
             if (ball.IsPocketed) return;
 
@@ -77,7 +77,7 @@ namespace BilliardPhysics
                 // tableFriction adds to the effective sliding coefficient so that table
                 // surface friction contributes to the translation-to-rotation coupling.
                 Fix64 jZero = slip * mEff;
-                Fix64 jMax  = ball.SlidingFriction * ball.Mass * Gravity * dt;
+                Fix64 jMax  = (ball.SlidingFriction + tableFriction) * ball.Mass * Gravity * dt;
                 Fix64 jMag  = Fix64.Min(jZero, jMax);
 
                 // Friction impulse direction: opposing the slip.
@@ -120,7 +120,7 @@ namespace BilliardPhysics
                     // tableFriction is added to ball.RollingFriction here; the rolling
                     // constraint (ω.Y = +Lv.X / R) couples this deceleration into a
                     // proportional change of the Y-axis angular velocity automatically.
-                    Fix64 rollingDecel = ball.RollingFriction * Gravity;
+                    Fix64 rollingDecel = (ball.RollingFriction + tableFriction) * Gravity;
                     Fix64 decelDt      = rollingDecel * dt;
 
                     if (speed <= decelDt)
