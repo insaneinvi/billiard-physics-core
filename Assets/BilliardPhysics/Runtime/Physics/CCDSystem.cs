@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace BilliardPhysics
@@ -29,6 +30,14 @@ namespace BilliardPhysics
 
         // ── Swept circle vs circle ────────────────────────────────────────────────
 
+        // Scale factor for converting Fix64 raw values to doubles (2^32 = 4 294 967 296).
+        private const double Fix64Scale = (double)(1L << 32);
+
+        // Fix64 multiplication wraps when the integer part of the result exceeds 2^31.
+        // For squaring: overflow when |value| > sqrt(2^31) ≈ 46340.95.
+        // Store the threshold as a raw Fix64 value (46341 * 2^32).
+        private static readonly long BallBallOverflowThreshold = 46341L << 32;
+
         /// <summary>
         /// Returns the earliest time in [0, dt] at which balls a and b first touch.
         /// </summary>
@@ -59,21 +68,42 @@ namespace BilliardPhysics
                 return true;
             }
 
-            Fix64 disc = bCoeff * bCoeff - Fix64.From(4) * aCoeff * cCoeff;
-            if (disc < Fix64.Zero) return false;
+            Fix64 t;
 
-            Fix64 sqrtDisc = Fix64.Sqrt(disc);
-            Fix64 two_a    = Fix64.From(2) * aCoeff;
-            Fix64 t        = (-bCoeff - sqrtDisc) / two_a;
+            // bCoeff*bCoeff wraps (overflows Fix64) when |bCoeff| > sqrt(2^31) ≈ 46341.
+            // At high shot strengths this makes the discriminant appear negative (false
+            // negative — missed collision).  Fall back to double-precision arithmetic in
+            // that regime to avoid both false negatives and false positives.
+            long bRaw = bCoeff.RawValue;
+            if (bRaw > BallBallOverflowThreshold || bRaw < -BallBallOverflowThreshold)
+            {
+                double da   = (double)aCoeff.RawValue / Fix64Scale;
+                double db   = (double)bCoeff.RawValue / Fix64Scale;
+                double dc   = (double)cCoeff.RawValue / Fix64Scale;
+                double disc = db * db - 4.0 * da * dc;
+                if (disc < 0.0) return false;
 
-            if (t < Fix64.Zero || t > dt) return false;
+                double dtD = (double)dt.RawValue / Fix64Scale;
+                double tD  = (-db - Math.Sqrt(disc)) / (2.0 * da);
+                if (tD < 0.0 || tD > dtD) return false;
 
-            // Guard against Fix64 integer overflow in the bCoeff*bCoeff term.
-            // For typical billiard speeds and separations, bCoeff ≈ 2·|dp|·|dv| can exceed
-            // ~46 000 (the Fix64 overflow threshold for squaring), causing the discriminant
-            // to appear non-negative for non-collisions (false positives).  Validate by
-            // checking whether the balls are genuinely touching at the candidate TOI: if the
-            // distance between their centres still exceeds radSum, the result is spurious.
+                t = new Fix64 { RawValue = (long)(tD * Fix64Scale) };
+            }
+            else
+            {
+                Fix64 disc = bCoeff * bCoeff - Fix64.From(4) * aCoeff * cCoeff;
+                if (disc < Fix64.Zero) return false;
+
+                Fix64 sqrtDisc = Fix64.Sqrt(disc);
+                Fix64 two_a    = Fix64.From(2) * aCoeff;
+                t              = (-bCoeff - sqrtDisc) / two_a;
+
+                if (t < Fix64.Zero || t > dt) return false;
+            }
+
+            // Validate: confirm the balls genuinely touch at the candidate TOI.
+            // This guards against false positives from Fix64 overflow in the normal path
+            // and catches any numerical imprecision in the double-precision path.
             FixVec2 posA = a.Position + a.LinearVelocity * t;
             FixVec2 posB = b.Position + b.LinearVelocity * t;
             if (FixVec2.Distance(posA, posB) > radSum)

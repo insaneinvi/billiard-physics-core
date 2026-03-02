@@ -1316,5 +1316,107 @@ namespace BilliardPhysics.Tests
                 $"minDist=60 mm, radSum={radSum.ToFloat():F2} mm, " +
                 $"ball B speed after pass = {speedB:F4} mm/s (must be < 1 mm/s).");
         }
+
+        // ── High-velocity CCD overflow regression ─────────────────────────────────
+
+        /// <summary>
+        /// Regression test: SweptCircleCircle must detect a ball-ball collision even when
+        /// |bCoeff| greatly exceeds the Fix64 squaring overflow threshold (≈ 46 341).
+        ///
+        /// With dp = (−100, 0) and dv = (10 000, 0):
+        ///   bCoeff = 2·dot(dp, dv) = −2 000 000  →  |bCoeff| >> 46 341
+        ///
+        /// Before the fix: bCoeff*bCoeff wraps in Fix64 to a large negative raw value,
+        /// making the discriminant appear negative and causing a false negative (missed
+        /// collision / ball tunnelling).
+        /// After  the fix: the double-precision fallback is used and the true positive
+        /// discriminant is computed correctly.
+        /// </summary>
+        [Test]
+        public void SweptCircleCircle_ExtremeVelocityApproach_DetectsCollisionDespiteOverflow()
+        {
+            var a = new Ball(0);
+            var b = new Ball(1);
+
+            // 100 units apart (clearly outside the combined radius ≈ 57.15 mm).
+            a.Position       = new FixVec2(Fix64.From(-100), Fix64.Zero);
+            b.Position       = FixVec2.Zero;
+            // Ball A approaches at 10 000 mm/s → |bCoeff| = 2 000 000 >> 46 341.
+            a.LinearVelocity = new FixVec2(Fix64.From(10000), Fix64.Zero);
+            b.LinearVelocity = FixVec2.Zero;
+
+            bool hit = CCDSystem.SweptCircleCircle(a, b, Fix64.One, out Fix64 toi);
+
+            Assert.IsTrue(hit,
+                "High-velocity CCD must detect the collision (false-negative / tunnelling fix).");
+            Assert.IsTrue(toi > Fix64.Zero,
+                "TOI must be positive (balls are not yet overlapping at t=0).");
+            Assert.IsTrue(toi < Fix64.One,
+                "TOI must fall within the time step.");
+        }
+
+        /// <summary>
+        /// Integration regression test: a cue ball struck with high strength AND spin
+        /// must physically collide with (not tunnel through) a stationary target ball.
+        ///
+        /// Root cause of the original bug:
+        ///   large strength  →  large linear velocity
+        ///   →  |bCoeff| >> 46 341  →  Fix64 overflow in bCoeff*bCoeff
+        ///   →  discriminant wraps to negative  →  collision missed (false negative)
+        ///   →  cue ball tunnels completely through the target in one sub-step.
+        ///
+        /// At v ≈ 20 000 mm/s the cue ball travels ~333 mm per 1/60 s step, which
+        /// exceeds the target ball's diameter (~114 mm); without the fix the cue passes
+        /// clean through and the target remains stationary.  With the fix the CCD falls
+        /// back to double-precision arithmetic, detects the collision, and resolves it
+        /// before the balls overlap.
+        ///
+        /// Acceptance criteria:
+        ///   1. Target ball gains positive X velocity (was hit, not tunnelled through).
+        ///   2. Centre-to-centre distance never falls below radSum − tolerance after
+        ///      the step (no residual interpenetration).
+        /// </summary>
+        [Test]
+        public void Step_HighStrengthWithSpin_CueBallCollidesNotTunnelsThroughTargetBall()
+        {
+            var world = new PhysicsWorld2D();
+
+            var cue    = new Ball(0);
+            var target = new Ball(1);
+
+            Fix64 radSum = cue.Radius + target.Radius;
+
+            // Target at origin; cue 200 mm to the left.
+            target.Position = FixVec2.Zero;
+            cue.Position    = new FixVec2(Fix64.From(-200), Fix64.Zero);
+
+            // High-strength cue strike in +X with both side- and top-spin.
+            // strength = 3 200 000 → v = 20 000 mm/s
+            //   (= strength / Ball.StandardMass = 3 200 000 / 160).
+            // |bCoeff| = 2 × 200 × 20 000 = 8 000 000  >>  overflow threshold (46 341).
+            Fix64   strength = Fix64.From(3200000);
+            Fix64   spinX    = Ball.StandardRadius / Fix64.From(3);  // lateral english
+            Fix64   spinY    = Ball.StandardRadius / Fix64.From(2);  // top-spin
+            CueStrike.Apply(cue, new FixVec2(Fix64.One, Fix64.Zero), strength, spinX, spinY);
+
+            world.AddBall(cue);
+            world.AddBall(target);
+
+            // One step is sufficient: the CCD must detect and resolve the collision
+            // before the cue ball exits the far side of the target.
+            world.Step();
+
+            // Target must have gained velocity (it was hit, not tunnelled through).
+            Assert.IsTrue(target.LinearVelocity.X > Fix64.Zero,
+                "Target ball must gain X velocity when struck by the high-speed cue ball " +
+                "(without the fix the cue tunnels through and the target stays stationary).");
+
+            // No residual interpenetration after the step.
+            Fix64 dist      = FixVec2.Distance(cue.Position, target.Position);
+            Fix64 tolerance = Fix64.FromFloat(0.5f);
+            Assert.IsTrue(dist >= radSum - tolerance,
+                $"Balls must not penetrate: dist={dist.ToFloat():F3}, " +
+                $"radSum={radSum.ToFloat():F3}");
+        }
     }
 }
