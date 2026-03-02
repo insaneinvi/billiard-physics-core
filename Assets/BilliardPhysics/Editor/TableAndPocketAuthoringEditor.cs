@@ -268,11 +268,11 @@ namespace BilliardPhysics.Editor
             // ── Coordinate Transform ──────────────────────────────────────
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Coordinate Transform", EditorStyles.boldLabel);
-            if (GUILayout.Button("Rotate CCW 90\u00b0 + Translate X=1270"))
+            if (GUILayout.Button("Rotate CCW 90\u00b0 + Translate X=12.70"))
             {
                 bool confirmed = EditorUtility.DisplayDialog(
                     "Apply Coordinate Transform",
-                    "This will rotate all table/pocket points 90\u00b0 counter-clockwise and translate X by +1270.\n\nThis operation is applied in-place and can be undone.",
+                    "This will rotate all table/pocket points 90\u00b0 counter-clockwise and translate X by +12.70.\n\nThis operation is applied in-place and can be undone.",
                     "Apply",
                     "Cancel");
                 if (confirmed)
@@ -344,7 +344,7 @@ namespace BilliardPhysics.Editor
         // ── Coordinate Transform Helpers ──────────────────────────────────
         // Rotate left (CCW) 90° about origin then translate X by offsetX.
         // Formula: newX = -oldY + offsetX, newY = oldX
-        private static Vector2 RotateLeft90TranslateX(Vector2 p, float offsetX = 1270f)
+        private static Vector2 RotateLeft90TranslateX(Vector2 p, float offsetX = 12.70f)
             => new Vector2(-p.y + offsetX, p.x);
 
         private static void TransformSegmentData(SegmentData seg)

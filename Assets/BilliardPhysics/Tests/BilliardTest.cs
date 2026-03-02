@@ -67,7 +67,7 @@ public class BilliardTest : MonoBehaviour
         cueBall.GetComponent<Renderer>().material.SetTexture("_MainTex", ballTextures[rackResult.CueBall.Number]);
         
         var cueBallShadow = Instantiate(tempShadow);
-        cueBallShadow.transform.position = new Vector3(rackResult.CueBall.Position.x + 15,  rackResult.CueBall.Position.y+5, -0.1f );
+        cueBallShadow.transform.position = new Vector3(rackResult.CueBall.Position.x + 0.1f,  rackResult.CueBall.Position.y+0.05f, -0.1f );
         
         ballShadowDict.Add(rackResult.CueBall.Number, cueBallShadow);
         ballDict.Add(rackResult.CueBall.Number, cueBall);
@@ -81,14 +81,14 @@ public class BilliardTest : MonoBehaviour
             ballDict.Add(ob.Number, objBall);
             
             var ballShadow = Instantiate(tempShadow);
-            ballShadow.transform.position = new Vector3(ob.Position.x + 10,  ob.Position.y+5, -0.1f );
+            ballShadow.transform.position = new Vector3(ob.Position.x + 0.1f,  ob.Position.y+0.05f, -0.1f );
             ballShadowDict.Add(ob.Number, ballShadow);
             _ballRotations.Add(ob.Number, Quaternion.identity);
         }
     }
     private void InitPhysicsWorldAndBall(RackResult  rackResult)
     {
-        var physicsData = Resources.Load<TextAsset>("Data/tb8h");
+        var physicsData = Resources.Load<TextAsset>("Data/tb8h_m");
         var (tableSegments, pockets) = TableAndPocketBinaryLoader.Load(physicsData);
         _physicsWorld = new();
         foreach (var tableSegment in tableSegments)
@@ -133,7 +133,7 @@ public class BilliardTest : MonoBehaviour
 
             ballObj.transform.position = new Vector3(ball.Position.X.ToFloat(), ball.Position.Y.ToFloat(), -BallRackHelper.HalfBallDiameter);
             ballObj.transform.rotation = _ballRotations[ball.Id];
-            ballShadowObj.transform.position = new Vector3( ballObj.transform.position.x + 15,   ballObj.transform.position.y+5, -0.1f );
+            ballShadowObj.transform.position = new Vector3( ballObj.transform.position.x + 0.1f,   ballObj.transform.position.y+0.05f, -0.1f );
         }
 
         isAllBallMotionless = IsAllBallMotionless();
@@ -153,7 +153,7 @@ public class BilliardTest : MonoBehaviour
     {
         if (!isAllBallMotionless) return;
         FixVec2 direction = new FixVec2(Fix64.One, Fix64.Zero).Normalized;
-        Fix64 strength = Fix64.From(1000000);
+        Fix64 strength = Fix64.From(60);
         _physicsWorld.ApplyCueStrike(cueBall, direction, strength, BilliardsPhysicsDefaults.Ball_Radius/10 * (new Random().Next(2) - 1), BilliardsPhysicsDefaults.Ball_Radius/10 * (new Random().Next(2) - 1));
     }
 }

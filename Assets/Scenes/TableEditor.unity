@@ -285,7 +285,7 @@ Camera:
   far clip plane: 1000
   field of view: 60
   orthographic: 1
-  orthographic size: 930
+  orthographic size: 9.3
   m_Depth: -1
   m_CullingMask:
     serializedVersion: 2
@@ -310,7 +310,7 @@ Transform:
   m_GameObject: {fileID: 124823285}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 1254, y: 637, z: -942}
+  m_LocalPosition: {x: 12.02, y: 6.7, z: -5}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -441,7 +441,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 251.5, y: 254, z: 254}
+  m_LocalScale: {x: 2.51, y: 2.54, z: 2.54}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
@@ -827,97 +827,97 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   Table:
     Segments:
-    - Start: {x: 48, y: -34}
-      End: {x: 1220, y: -50}
+    - Start: {x: 0.48, y: -0.34}
+      End: {x: 12.2, y: -0.5}
       ConnectionPoints:
-      - {x: 82, y: 0}
-      - {x: 1205, y: 0}
-    - Start: {x: 1320, y: -50}
-      End: {x: 2492, y: -34}
+      - {x: 0.82, y: 0}
+      - {x: 12.05, y: 0}
+    - Start: {x: 13.2, y: -0.5}
+      End: {x: 24.92, y: -0.34}
       ConnectionPoints:
-      - {x: 1335, y: 0}
-      - {x: 2458, y: 0}
-    - Start: {x: 2578, y: 48}
-      End: {x: 2578, y: 1222}
+      - {x: 13.349999, y: 0}
+      - {x: 24.58, y: 0}
+    - Start: {x: 25.779999, y: 0.48}
+      End: {x: 25.779999, y: 12.219999}
       ConnectionPoints:
-      - {x: 2540, y: 83}
-      - {x: 2540, y: 1187}
-    - Start: {x: 2492, y: 1304}
-      End: {x: 1320, y: 1304}
+      - {x: 25.4, y: 0.83}
+      - {x: 25.4, y: 11.87}
+    - Start: {x: 24.92, y: 13.04}
+      End: {x: 13.2, y: 13.04}
       ConnectionPoints:
-      - {x: 2458, y: 1270}
-      - {x: 1335, y: 1270}
-    - Start: {x: 1220, y: 1304}
-      End: {x: 48, y: 1304}
+      - {x: 24.58, y: 12.7}
+      - {x: 13.349999, y: 12.7}
+    - Start: {x: 12.2, y: 13.04}
+      End: {x: 0.48, y: 13.04}
       ConnectionPoints:
-      - {x: 1205, y: 1270}
-      - {x: 83, y: 1270}
-    - Start: {x: -34, y: 1222}
-      End: {x: -34, y: 48}
+      - {x: 12.05, y: 12.7}
+      - {x: 0.83, y: 12.7}
+    - Start: {x: -0.34, y: 12.219999}
+      End: {x: -0.34, y: 0.48}
       ConnectionPoints:
-      - {x: 0, y: 1187}
-      - {x: 0, y: 83}
+      - {x: 0, y: 11.87}
+      - {x: 0, y: 0.83}
   Pockets:
-  - Center: {x: -40, y: -40}
-    Radius: 100
+  - Center: {x: -0.39999998, y: -0.39999998}
+    Radius: 1
     ReboundVelocityThreshold: 0
     RimSegments:
-      Start: {x: 48, y: -34}
-      End: {x: -34, y: 48}
+      Start: {x: 0.48, y: -0.34}
+      End: {x: -0.34, y: 0.48}
       ConnectionPoints:
-      - {x: 0, y: -60}
-      - {x: -42.42627, y: -42.42627}
-      - {x: -60, y: 0}
-  - Center: {x: 1270, y: -105}
-    Radius: 95
+      - {x: 0, y: -0.59999996}
+      - {x: -0.424262, y: -0.424262}
+      - {x: -0.59999996, y: 0}
+  - Center: {x: 12.7, y: -1.05}
+    Radius: 0.95
     ReboundVelocityThreshold: 0
     RimSegments:
-      Start: {x: 1220, y: -50}
-      End: {x: 1320, y: -50}
+      Start: {x: 12.2, y: -0.5}
+      End: {x: 13.2, y: -0.5}
       ConnectionPoints:
-      - {x: 1233.2299, y: -76.76953}
-      - {x: 1270, y: -92}
-      - {x: 1306.7695, y: -76.76953}
-  - Center: {x: 2580, y: -40}
-    Radius: 100
+      - {x: 12.332298, y: -0.767695}
+      - {x: 12.7, y: -0.91999996}
+      - {x: 13.067695, y: -0.767695}
+  - Center: {x: 25.8, y: -0.39999998}
+    Radius: 1
     ReboundVelocityThreshold: 0
     RimSegments:
-      Start: {x: 2578, y: 48}
-      End: {x: 2492, y: -34}
+      Start: {x: 25.779999, y: 0.48}
+      End: {x: 24.92, y: -0.34}
       ConnectionPoints:
-      - {x: 2600, y: 0}
-      - {x: 2582.4265, y: -42.42627}
-      - {x: 2540, y: -60}
-  - Center: {x: 2580, y: 1310}
-    Radius: 100
+      - {x: 26, y: 0}
+      - {x: 25.824265, y: -0.424262}
+      - {x: 25.4, y: -0.59999996}
+  - Center: {x: 25.8, y: 13.099999}
+    Radius: 1
     ReboundVelocityThreshold: 0
     RimSegments:
-      Start: {x: 2492, y: 1304}
-      End: {x: 2578, y: 1222}
+      Start: {x: 24.92, y: 13.04}
+      End: {x: 25.779999, y: 12.219999}
       ConnectionPoints:
-      - {x: 2540, y: 1330}
-      - {x: 2582.4265, y: 1312.4261}
-      - {x: 2600, y: 1270}
-  - Center: {x: 1270, y: 1375}
-    Radius: 95
+      - {x: 25.4, y: 13.299999}
+      - {x: 25.824265, y: 13.124261}
+      - {x: 26, y: 12.7}
+  - Center: {x: 12.7, y: 13.75}
+    Radius: 0.95
     ReboundVelocityThreshold: 0
     RimSegments:
-      Start: {x: 1220, y: 1304}
-      End: {x: 1320, y: 1304}
+      Start: {x: 12.2, y: 13.04}
+      End: {x: 13.2, y: 13.04}
       ConnectionPoints:
-      - {x: 1227.5736, y: 1341.1375}
-      - {x: 1270, y: 1358.7113}
-      - {x: 1312.4261, y: 1341.1375}
-  - Center: {x: -40, y: 1310}
-    Radius: 100
+      - {x: 12.275736, y: 13.411374}
+      - {x: 12.7, y: 13.587112}
+      - {x: 13.124261, y: 13.411374}
+  - Center: {x: -0.39999998, y: 13.099999}
+    Radius: 1
     ReboundVelocityThreshold: 0
     RimSegments:
-      Start: {x: -34, y: 1222}
-      End: {x: 48, y: 1304}
+      Start: {x: -0.34, y: 12.219999}
+      End: {x: 0.48, y: 13.04}
       ConnectionPoints:
-      - {x: -60, y: 1270}
-      - {x: -42.42627, y: 1312.4261}
-      - {x: 0, y: 1330}
+      - {x: -0.59999996, y: 12.7}
+      - {x: -0.424262, y: 13.124261}
+      - {x: 0, y: 13.299999}
 --- !u!1001 &1880658259
 PrefabInstance:
   m_ObjectHideFlags: 0
