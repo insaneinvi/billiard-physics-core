@@ -17,6 +17,14 @@ namespace BilliardPhysics
             /// Valid only when <see cref="IsBallBall"/> is <c>false</c>.
             /// </summary>
             public FixVec2 HitNormal;
+            /// <summary>
+            /// Closest point on the struck cushion surface in world space (contact point).
+            /// For face hits this is the foot of the perpendicular from the ball centre to
+            /// the sub-segment at TOI; for vertex hits it is the vertex position.
+            /// Valid only when <see cref="IsBallBall"/> is <c>false</c>.
+            /// Used by <see cref="PhysicsWorld2D"/> for positional push-out to prevent tunnelling.
+            /// </summary>
+            public FixVec2 HitPoint;
         }
 
         // ── Swept circle vs circle ────────────────────────────────────────────────
@@ -110,17 +118,20 @@ namespace BilliardPhysics
         /// Tests a swept circle against a (possibly polyline) <see cref="Segment"/>.
         /// Iterates every sub-segment and all polyline vertices, returning the
         /// earliest <paramref name="toi"/> in [0, dt] and the corresponding
-        /// outward <paramref name="hitNormal"/>.
+        /// outward <paramref name="hitNormal"/> and cushion-surface contact point
+        /// <paramref name="hitPoint"/>.
         /// </summary>
         public static bool SweptCircleSegment(Ball ball, Segment seg, Fix64 dt,
-                                              out Fix64 toi, out FixVec2 hitNormal)
+                                              out Fix64 toi, out FixVec2 hitNormal, out FixVec2 hitPoint)
         {
             toi       = Fix64.Zero;
             hitNormal = FixVec2.Zero;
+            hitPoint  = FixVec2.Zero;
 
-            bool  bestHit    = false;
-            Fix64 bestToi    = dt;
-            FixVec2 bestNormal = FixVec2.Zero;
+            bool    bestHit      = false;
+            Fix64   bestToi      = dt;
+            FixVec2 bestNormal   = FixVec2.Zero;
+            FixVec2 bestHitPoint = FixVec2.Zero;
 
             IReadOnlyList<FixVec2> points = seg.Points;
             int subSegCount = points.Count - 1;
@@ -150,9 +161,11 @@ namespace BilliardPhysics
                 {
                     if (!bestHit || t < bestToi)
                     {
-                        bestHit    = true;
-                        bestToi    = t;
-                        bestNormal = n;
+                        bestHit      = true;
+                        bestToi      = t;
+                        bestNormal   = n;
+                        // Contact point on the cushion face: perpendicular foot from ball centre.
+                        bestHitPoint = hitPos - n * ball.Radius;
                     }
                 }
             }
@@ -177,9 +190,18 @@ namespace BilliardPhysics
                         // Normal points from the vertex toward the ball centre at TOI.
                         FixVec2 ballAtToi = ball.Position + ball.LinearVelocity * ptToi;
                         FixVec2 dp        = ballAtToi - pt;
-                        bestHit    = true;
-                        bestToi    = ptToi;
-                        bestNormal = dp.Normalized;
+                        // Guard against degenerate case where ball centre coincides with vertex.
+                        FixVec2 normal;
+                        if (dp.SqrMagnitude > Fix64.Zero)
+                            normal = dp.Normalized;
+                        else if (ball.LinearVelocity.SqrMagnitude > Fix64.Zero)
+                            normal = -(ball.LinearVelocity.Normalized);
+                        else
+                            normal = new FixVec2(Fix64.One, Fix64.Zero);
+                        bestHit      = true;
+                        bestToi      = ptToi;
+                        bestNormal   = normal;
+                        bestHitPoint = pt;
                     }
                 }
             }
@@ -188,16 +210,28 @@ namespace BilliardPhysics
 
             toi       = bestToi;
             hitNormal = bestNormal;
+            hitPoint  = bestHitPoint;
             return true;
         }
 
         /// <summary>
-        /// Overload kept for source compatibility; <see cref="hitNormal"/> is discarded.
+        /// Overload kept for source compatibility; <paramref name="hitPoint"/> is discarded.
+        /// </summary>
+        public static bool SweptCircleSegment(Ball ball, Segment seg, Fix64 dt,
+                                              out Fix64 toi, out FixVec2 hitNormal)
+        {
+            FixVec2 dummy;
+            return SweptCircleSegment(ball, seg, dt, out toi, out hitNormal, out dummy);
+        }
+
+        /// <summary>
+        /// Overload kept for source compatibility; <paramref name="hitNormal"/> and
+        /// <paramref name="hitPoint"/> are discarded.
         /// </summary>
         public static bool SweptCircleSegment(Ball ball, Segment seg, Fix64 dt, out Fix64 toi)
         {
-            FixVec2 dummy;
-            return SweptCircleSegment(ball, seg, dt, out toi, out dummy);
+            FixVec2 dummyNormal, dummyHitPoint;
+            return SweptCircleSegment(ball, seg, dt, out toi, out dummyNormal, out dummyHitPoint);
         }
 
         // ── Performance counters ─────────────────────────────────────────────────
@@ -301,7 +335,8 @@ namespace BilliardPhysics
                     NarrowPhaseSegmentCalls++;
                     Fix64   toi;
                     FixVec2 hitNormal;
-                    if (SweptCircleSegment(ball, seg, dt, out toi, out hitNormal))
+                    FixVec2 hitPoint;
+                    if (SweptCircleSegment(ball, seg, dt, out toi, out hitNormal, out hitPoint))
                     {
                         if (!best.Hit || toi < best.TOI ||
                             (toi == best.TOI && ball.Id < best.BallA))
@@ -313,6 +348,7 @@ namespace BilliardPhysics
                                 BallA      = ball.Id,
                                 Segment    = seg,
                                 HitNormal  = hitNormal,
+                                HitPoint   = hitPoint,
                                 IsBallBall = false
                             };
                         }
