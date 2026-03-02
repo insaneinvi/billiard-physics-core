@@ -1418,5 +1418,106 @@ namespace BilliardPhysics.Tests
                 $"Balls must not penetrate: dist={dist.ToFloat():F3}, " +
                 $"radSum={radSum.ToFloat():F3}");
         }
+
+        // ── High-velocity cushion-vertex CCD overflow regression ──────────────────
+
+        /// <summary>
+        /// Regression test: SweptCircleSegment must detect a ball–vertex collision even
+        /// when |bCoeff| greatly exceeds the Fix64 squaring overflow threshold (≈ 46 341).
+        ///
+        /// Setup: a short vertical segment from (30, −10) to (30, 10).  The ball travels
+        /// at 20 000 mm/s along y = −11, which is 1 unit below the segment's bottom
+        /// endpoint (30, −10).  The face hit misses (proj &lt; 0 because the ball's Y is
+        /// outside [−10, 10]); only the vertex CCD can detect the collision.
+        ///
+        ///   dp ≈ (−30, −1),  dv = (20 000, 0)
+        ///   bCoeff = 2·dot(dp, dv) = −1 200 000  →  |bCoeff| >> 46 341  →  overflow risk.
+        ///
+        /// Before the fix: bCoeff*bCoeff wraps in Fix64, making the discriminant appear
+        /// negative → SweptCirclePoint returns false (false negative → ball tunnels
+        /// through the vertex / segment endpoint).
+        /// After  the fix: the double-precision fallback is used and the true positive
+        /// discriminant is computed correctly.
+        /// </summary>
+        [Test]
+        public void SweptCircleSegment_ExtremeVelocityApproachesVertex_DetectsCollisionDespiteOverflow()
+        {
+            var ball = new Ball(0);
+            // Ball travels along y = −11 at 20 000 mm/s in +X.
+            ball.Position       = new FixVec2(Fix64.Zero, Fix64.From(-11));
+            ball.LinearVelocity = new FixVec2(Fix64.From(20000), Fix64.Zero);
+
+            // Short segment: face runs from (30, −10) to (30, 10).
+            // Ball Y = −11 is 1 unit below the bottom endpoint (30, −10), so the face
+            // hit projection falls outside [0, 20] and is skipped.  Only the bottom
+            // vertex (30, −10) can register the collision.
+            var seg = new Segment(
+                new FixVec2(Fix64.From(30), Fix64.From(-10)),
+                new FixVec2(Fix64.From(30), Fix64.From(10)));
+
+            // Use dt = 1 s so the vertex (30 mm away at 20 000 mm/s) is reachable.
+            bool hit = CCDSystem.SweptCircleSegment(ball, seg, Fix64.One, out Fix64 toi);
+
+            Assert.IsTrue(hit,
+                "High-velocity vertex CCD must detect the collision despite Fix64 overflow " +
+                "(false-negative / cushion-vertex tunnelling fix).");
+            Assert.IsTrue(toi > Fix64.Zero && toi < Fix64.One,
+                $"TOI must be in (0, 1); got {toi.ToFloat():F6}");
+        }
+
+        /// <summary>
+        /// Integration regression test: a ball struck with extreme cue strength AND spin
+        /// must be stopped by a nearby segment vertex (cushion endpoint) and must not
+        /// tunnel through it.
+        ///
+        /// Setup: a single short vertical segment whose face the ball misses by 1 unit
+        /// (ball Y = −11, segment Y ∈ [−10, 10]).  The bottom endpoint (30, −10) is the
+        /// only thing that should stop the ball.
+        ///
+        ///   strength = 3 200 000  →  v ≈ 20 000 mm/s
+        ///   |bCoeff| = 2·30·20 000 = 1 200 000  >>  46 341 (overflow threshold)
+        ///
+        /// Without the fix: SweptCirclePoint overflows → vertex collision missed → ball
+        /// passes x = 30 and continues rightward (LinearVelocity.X stays positive after step).
+        /// With    the fix: vertex collision detected → ball bounces back
+        /// (LinearVelocity.X becomes ≤ 0 or ball.Position.X stays ≤ 30 + ball radius).
+        /// </summary>
+        [Test]
+        public void Step_ExtremeVelocityBallApproachesSegmentVertex_VertexCollisionDetected()
+        {
+            var world = new PhysicsWorld2D();
+
+            // Short vertical segment at x = 30: face from y = −10 to y = 10.
+            // The face is narrower than the ball radius, so the face hit will NOT be
+            // triggered when the ball travels at y = −11 (1 unit below the bottom endpoint).
+            var seg = new Segment(
+                new FixVec2(Fix64.From(30), Fix64.From(-10)),
+                new FixVec2(Fix64.From(30), Fix64.From(10)));
+            world.AddSegment(seg);
+
+            var ball = new Ball(0);
+            // Place ball at y = −11 so its path misses the face and only hits the vertex.
+            ball.Position = new FixVec2(Fix64.Zero, Fix64.From(-11));
+
+            // Apply extreme cue strength + spin, same as the ball–ball regression test.
+            Fix64 strength = Fix64.From(3200000);
+            Fix64 spinX    = Ball.StandardRadius / Fix64.From(3);
+            Fix64 spinY    = Ball.StandardRadius / Fix64.From(2);
+            CueStrike.Apply(ball, new FixVec2(Fix64.One, Fix64.Zero), strength, spinX, spinY);
+
+            world.AddBall(ball);
+
+            // One step must be enough: vertex is only 30 mm away at ~20 000 mm/s.
+            world.Step();
+
+            // The ball must have been deflected by the vertex: either it bounced back
+            // (vX ≤ 0) or its position stayed left of the segment (x ≤ 30 + radius).
+            bool deflected = ball.LinearVelocity.X <= Fix64.Zero ||
+                             ball.Position.X <= Fix64.From(30) + ball.Radius;
+            Assert.IsTrue(deflected,
+                $"Ball must be deflected by the segment vertex (cushion-vertex tunnelling fix). " +
+                $"Position.X={ball.Position.X.ToFloat():F3}, " +
+                $"LinearVelocity.X={ball.LinearVelocity.X.ToFloat():F1}");
+        }
     }
 }

@@ -136,13 +136,37 @@ namespace BilliardPhysics
                 return true;
             }
 
-            Fix64 disc = bCoeff * bCoeff - Fix64.From(4) * aCoeff * cCoeff;
-            if (disc < Fix64.Zero) return false;
+            Fix64 t;
 
-            Fix64 sqrtDisc = Fix64.Sqrt(disc);
-            Fix64 t        = (-bCoeff - sqrtDisc) / (Fix64.From(2) * aCoeff);
+            // bCoeff*bCoeff wraps (overflows Fix64) when |bCoeff| > sqrt(2^31) ≈ 46341.
+            // At high shot strengths this makes the discriminant appear negative (false
+            // negative — missed vertex collision).  Fall back to double-precision in that
+            // regime, mirroring the same guard used in SweptCircleCircle.
+            long bRaw = bCoeff.RawValue;
+            if (bRaw > BallBallOverflowThreshold || bRaw < -BallBallOverflowThreshold)
+            {
+                double da   = (double)aCoeff.RawValue / Fix64Scale;
+                double db   = (double)bCoeff.RawValue / Fix64Scale;
+                double dc   = (double)cCoeff.RawValue / Fix64Scale;
+                double disc = db * db - 4.0 * da * dc;
+                if (disc < 0.0) return false;
 
-            if (t < Fix64.Zero || t > dt) return false;
+                double dtD = (double)dt.RawValue / Fix64Scale;
+                double tD  = (-db - Math.Sqrt(disc)) / (2.0 * da);
+                if (tD < 0.0 || tD > dtD) return false;
+
+                t = new Fix64 { RawValue = (long)(tD * Fix64Scale) };
+            }
+            else
+            {
+                Fix64 disc = bCoeff * bCoeff - Fix64.From(4) * aCoeff * cCoeff;
+                if (disc < Fix64.Zero) return false;
+
+                Fix64 sqrtDisc = Fix64.Sqrt(disc);
+                t              = (-bCoeff - sqrtDisc) / (Fix64.From(2) * aCoeff);
+
+                if (t < Fix64.Zero || t > dt) return false;
+            }
 
             toi = t;
             return true;
