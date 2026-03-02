@@ -198,6 +198,54 @@ namespace BilliardPhysics.Tests
                 $"Tangential velocity must be mostly preserved: before={vay0:F2}, after={vay1:F2}");
         }
 
+        // ── Thin / grazing collision regression ───────────────────────────────────
+
+        /// <summary>
+        /// Very thin / grazing shot (vx = 5, vy = 400): the cue ball barely touches the
+        /// target ball in the normal direction.  Three invariants must all hold:
+        ///   1. Total translational kinetic energy must not increase.
+        ///   2. The cue-ball speed must not increase beyond a small fixed-point tolerance.
+        ///   3. After the impulse the balls must be moving apart (v_rel·n ≤ 0).
+        ///
+        /// This test serves as a regression guard for the "grazing-acceleration" bug:
+        ///   • An inverted approach-guard (v_rel_n ≥ 0 → skip) leaves the balls still
+        ///     approaching, so invariant 3 fails.
+        ///   • A wrong sign on the normal impulse j pushes the cue ball toward the target
+        ///     instead of away, violating invariants 1–3.
+        ///   • A wrong sign on the tangential impulse jt accelerates the cue ball in the
+        ///     direction of its own tangential motion, violating invariants 1 and 2.
+        /// </summary>
+        [Test]
+        public void ResolveBallBall_ThinGrazingShot_SpeedAndEnergyDoNotIncrease()
+        {
+            var (a, b) = MakeTouchingPair(vx: 5, vy: 400);
+
+            float m    = a.Mass.ToFloat();
+            float ke0  = KE(m, a) + KE(m, b);
+            float spd0 = a.LinearVelocity.Magnitude.ToFloat();
+
+            ImpulseResolver.ResolveBallBall(a, b);
+
+            float ke1  = KE(m, a) + KE(m, b);
+            float spd1 = a.LinearVelocity.Magnitude.ToFloat();
+
+            // (1) Total translational kinetic energy must not increase.
+            float eps = ke0 * 0.001f;
+            Assert.IsTrue(ke1 <= ke0 + eps,
+                $"Grazing-shot KE must not increase: before={ke0:F1}, after={ke1:F1}");
+
+            // (2) Cue-ball speed must not increase (0.5 unit tolerance for fixed-point sqrt).
+            Assert.IsTrue(spd1 <= spd0 + 0.5f,
+                $"Grazing-shot cue-ball speed must not increase: before={spd0:F3}, after={spd1:F3}");
+
+            // (3) After the impulse the balls must be separating (v_rel·n ≤ 0).
+            FixVec2 n     = (b.Position - a.Position).Normalized;
+            FixVec2 v_rel = a.LinearVelocity - b.LinearVelocity;
+            float   vRelN = FixVec2.Dot(v_rel, n).ToFloat();
+            Assert.IsTrue(vRelN <= 0.5f,
+                $"Grazing-shot balls must separate after impulse: v_rel·n = {vRelN:F4} (expected ≤ 0)");
+        }
+
         // ── Helpers ───────────────────────────────────────────────────────────────
 
         private static float KE(float mass, Ball ball)
