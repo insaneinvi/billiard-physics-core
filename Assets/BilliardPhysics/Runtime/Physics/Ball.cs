@@ -17,6 +17,13 @@ namespace BilliardPhysics
         public FixVec3    AngularVelocity;
         public bool       IsMotionless;
         public bool       IsPocketed;
+        /// <summary>
+        /// True when the ball is in pure-rolling state (contact-point slip ≈ 0).
+        /// Set by <see cref="MotionSimulator.Step"/> each tick.
+        /// Used by <see cref="ImpulseResolver"/> to confirm that only the Z (side-spin)
+        /// component of <see cref="AngularVelocity"/> is relevant to collision kinematics.
+        /// </summary>
+        public bool       IsRolling;
 
         // ── Physical parameters ───────────────────────────────────────────────────
         public Fix64 Radius;
@@ -61,6 +68,7 @@ namespace BilliardPhysics
             AngularVelocity = FixVec3.Zero;
             IsMotionless    = true;
             IsPocketed      = false;
+            IsRolling       = false;
         }
     }
 }

@@ -198,6 +198,71 @@ namespace BilliardPhysics.Tests
                 $"Tangential velocity must be mostly preserved: before={vay0:F2}, after={vay1:F2}");
         }
 
+        // ── Rolling-state: ω.X/Y must not affect collision outcomes ──────────────
+
+        /// <summary>
+        /// When ball a is in rolling state, arbitrary changes to ω.X and ω.Y must not
+        /// alter the ball–ball collision outcome.  Only ω.Z (side-spin) is permitted to
+        /// influence the contact velocity; ω.X/Y are masked out by the resolver.
+        /// </summary>
+        [Test]
+        public void ResolveBallBall_RollingBall_OutcomeIndependentOfOmegaXY()
+        {
+            // Baseline: rolling ball a (IsRolling=true, ω.X=ω.Y=0) hits stationary b.
+            var (a1, b1) = MakeTouchingPair(vx: 300, vy: 0);
+            a1.IsRolling = true;
+
+            // Variant: same scenario but with large, arbitrary ω.X/Y on ball a.
+            var (a2, b2) = MakeTouchingPair(vx: 300, vy: 0);
+            a2.IsRolling = true;
+            a2.AngularVelocity.X = Fix64.From(50);   // non-zero ω.X
+            a2.AngularVelocity.Y = Fix64.From(-30);  // non-zero ω.Y
+
+            ImpulseResolver.ResolveBallBall(a1, b1);
+            ImpulseResolver.ResolveBallBall(a2, b2);
+
+            // Post-collision linear velocities must be identical (within fixed-point precision).
+            Assert.AreEqual(a1.LinearVelocity.X.ToFloat(), a2.LinearVelocity.X.ToFloat(), 0.001f,
+                "Rolling ball-a: Vx must be independent of ω.X/Y.");
+            Assert.AreEqual(a1.LinearVelocity.Y.ToFloat(), a2.LinearVelocity.Y.ToFloat(), 0.001f,
+                "Rolling ball-a: Vy must be independent of ω.X/Y.");
+            Assert.AreEqual(b1.LinearVelocity.X.ToFloat(), b2.LinearVelocity.X.ToFloat(), 0.001f,
+                "Rolling target ball-b: Vx must be independent of ω.X/Y of ball a.");
+        }
+
+        /// <summary>
+        /// When a ball in rolling state hits a cushion, arbitrary ω.X/Y must not affect
+        /// the bounce outcome.  Only ω.Z (side-spin) contributes to cushion contact velocity.
+        /// </summary>
+        [Test]
+        public void ResolveBallCushion_RollingBall_OutcomeIndependentOfOmegaXY()
+        {
+            // Outward cushion normal is +X; ball moves in -X (toward wall).
+            FixVec2 hitNormal = new FixVec2(Fix64.One, Fix64.Zero);
+
+            // Baseline: rolling ball with ω.X=ω.Y=0.
+            var ball1 = new Ball(0);
+            ball1.Position       = FixVec2.Zero;
+            ball1.LinearVelocity = new FixVec2(Fix64.From(-300), Fix64.Zero);
+            ball1.IsRolling      = true;
+
+            // Variant: same but with large, arbitrary ω.X/Y.
+            var ball2 = new Ball(0);
+            ball2.Position       = FixVec2.Zero;
+            ball2.LinearVelocity = new FixVec2(Fix64.From(-300), Fix64.Zero);
+            ball2.IsRolling      = true;
+            ball2.AngularVelocity.X = Fix64.From(50);
+            ball2.AngularVelocity.Y = Fix64.From(-30);
+
+            ImpulseResolver.ResolveBallCushion(ball1, hitNormal);
+            ImpulseResolver.ResolveBallCushion(ball2, hitNormal);
+
+            Assert.AreEqual(ball1.LinearVelocity.X.ToFloat(), ball2.LinearVelocity.X.ToFloat(), 0.001f,
+                "Cushion bounce Vx must be independent of ω.X/Y when rolling.");
+            Assert.AreEqual(ball1.LinearVelocity.Y.ToFloat(), ball2.LinearVelocity.Y.ToFloat(), 0.001f,
+                "Cushion bounce Vy must be independent of ω.X/Y when rolling.");
+        }
+
         // ── Helpers ───────────────────────────────────────────────────────────────
 
         private static float KE(float mass, Ball ball)

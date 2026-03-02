@@ -47,6 +47,7 @@ namespace BilliardPhysics
             if (linearStopped && angularStopped)
             {
                 ball.IsMotionless = true;
+                ball.IsRolling    = false;
                 return;
             }
 
@@ -109,6 +110,11 @@ namespace BilliardPhysics
             Fix64 vtY2   = ball.LinearVelocity.Y + ball.AngularVelocity.X * R;
             Fix64 newSlip = Fix64.Sqrt(vtX2 * vtX2 + vtY2 * vtY2);
             speed         = ball.LinearVelocity.Magnitude;
+
+            // Track pure-rolling state: slip below threshold means the ball rolls
+            // without sliding.  ImpulseResolver reads this flag to confirm that only
+            // ω.Z contributes to collision kinematics (ω.X/Y are masked out).
+            ball.IsRolling = newSlip < Epsilon;
 
             if (newSlip < Epsilon)
             {

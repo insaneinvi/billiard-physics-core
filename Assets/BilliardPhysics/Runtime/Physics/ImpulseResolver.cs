@@ -33,11 +33,17 @@ namespace BilliardPhysics
             FixVec2 rb = -n * b.Radius;
 
             // Velocity at contact point (linear + angular contribution).
-            // ω × r for an in-plane r = (rx, ry, 0) reduces to ω.Z * r.Perp()
-            // regardless of Z convention (Z-up or Z-down), since only the Z
-            // component of ω contributes to the XY contact velocity.
-            FixVec2 va_contact = a.LinearVelocity + a.AngularVelocity.Z * ra.Perp();
-            FixVec2 vb_contact = b.LinearVelocity + b.AngularVelocity.Z * rb.Perp();
+            // For a 2D contact point r = (rx, ry, 0) the full 3-D cross product
+            // ω × r has XY components (+ω.Z·ry, −ω.Z·rx) = ω.Z · r.Perp().
+            // ω.X and ω.Y only produce a Z-component in ω × r, which is perpendicular
+            // to the table plane and therefore does not contribute to the in-plane
+            // contact velocity.  The 2D formula below naturally masks ω.X/Y; when a
+            // ball is in rolling state (IsRolling == true) this ensures that any residual
+            // ω.X/Y drift does not feed back into collision impulses.
+            Fix64   omZa       = a.AngularVelocity.Z;  // ω_used.Z for ball a (ω.X/Y masked)
+            Fix64   omZb       = b.AngularVelocity.Z;  // ω_used.Z for ball b (ω.X/Y masked)
+            FixVec2 va_contact = a.LinearVelocity + omZa * ra.Perp();
+            FixVec2 vb_contact = b.LinearVelocity + omZb * rb.Perp();
             FixVec2 v_rel      = va_contact - vb_contact;
 
             // Sign convention: n points from a to b.
@@ -144,8 +150,11 @@ namespace BilliardPhysics
             FixVec2 r      = -n * ball.Radius;
             FixVec2 rPerp  = r.Perp();
 
-            // Velocity at contact point (ω.Z drives the in-plane angular contribution).
-            FixVec2 v_contact = ball.LinearVelocity + ball.AngularVelocity.Z * rPerp;
+            // Velocity at contact point.  Only ω.Z (side-spin) contributes to the
+            // in-plane contact velocity; ω.X/Y are masked out here (rolling-state
+            // invariant: ω.X/Y do not feed back into collision impulses).
+            Fix64   omZ       = ball.AngularVelocity.Z;  // ω_used.Z (ω.X/Y masked)
+            FixVec2 v_contact = ball.LinearVelocity + omZ * rPerp;
             Fix64   v_rel_n   = FixVec2.Dot(v_contact, n);
             if (v_rel_n >= Fix64.Zero) return;
 
