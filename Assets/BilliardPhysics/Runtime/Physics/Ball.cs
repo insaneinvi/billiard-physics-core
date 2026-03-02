@@ -28,8 +28,8 @@ namespace BilliardPhysics
         public Fix64 SpinFriction;
 
         // ── Standard defaults ─────────────────────────────────────────────────────
-        public static readonly Fix64 StandardRadius = Fix64.FromFloat(0.028575f, 6);  // 0.028575 m (WPA spec: diameter = 57.15 mm)
-        public static readonly Fix64 StandardMass   = Fix64.FromFloat(0.16f, 4);      // 0.16 kg
+        public static readonly Fix64 StandardRadius = Fix64.FromFloat(0.28575f, 6);  // 28.575 mm scaled by 1/100
+        public static readonly Fix64 StandardMass   = Fix64.FromFloat(1.6f, 4);      // 160 g scaled by 1/100
 
         /// <param name="id">Unique ball identifier.</param>
         /// <param name="radius">Ball radius in physics units.</param>
