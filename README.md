@@ -241,32 +241,89 @@ public class AimController : MonoBehaviour
 
 完全解耦渲染层：不持有任何 `MonoBehaviour`、`Transform`、`Renderer` 或 `Material` 引用，一个实例可复用（对象池友好）。
 
+**为什么需要对象池？**
+
+`PocketDropAniHelper` 是单条动画轨道，一次 `StartDrop` 对应一套独立的播放状态。当多个球在同一帧落袋时，若共享同一个 helper，后一次 `StartDrop` 会立即覆盖前一次的内部状态，导致先落袋球的动画被中断。因此**并发动画必须各持独立实例**；对象池让这些实例在动画完成后（`Finished`）得以复用，避免每次落袋都触发 GC。
+
+**helper 的回收点固定在 `PocketDropPhase.Finished`**：此时动画已完整播完，`Reset()` 后即可安全投入下一次使用。
+
 **使用示例：**
 
 ```csharp
+using System.Collections.Generic;
 using BilliardPhysics.AniHelp;
 using UnityEngine;
 
+// ── 轻量对象池：避免并发动画时频繁 new helper ─────────────────────────────────
+public sealed class PocketDropAniHelperPool
+{
+    private readonly Stack<PocketDropAniHelper> _stack = new Stack<PocketDropAniHelper>();
+
+    /// <summary>取出一个 helper（池为空则新建）。</summary>
+    /// <returns>可直接调用 StartDrop 的 helper 实例。</returns>
+    public PocketDropAniHelper Rent()
+        => _stack.Count > 0 ? _stack.Pop() : new PocketDropAniHelper();
+
+    /// <summary>归还 helper。归还前自动调用 Reset() 清除播放状态。</summary>
+    /// <param name="helper">待归还的 helper 实例。</param>
+    public void Return(PocketDropAniHelper helper)
+    {
+        helper.Reset();
+        _stack.Push(helper);
+    }
+}
+
+// ── 单条并发动画的数据容器 ─────────────────────────────────────────────────────
+// 每颗同时在播的落袋动画对应一个 ActiveDrop，持有 Transform、Renderer、基础色和 helper。
+internal sealed class ActiveDrop
+{
+    public Transform           BallTransform;
+    public Renderer            BallRenderer;
+    public Color               BaseColor;
+    public PocketDropAniHelper Helper;
+}
+
+// ── 控制器 ────────────────────────────────────────────────────────────────────
 public class BallDropController : MonoBehaviour
 {
-    // 在 Inspector 或代码中赋值
-    public Transform    ballTransform;
-    public Renderer     ballRenderer;
+    // 对象池：在同一个 Controller 实例内复用 helper
+    private readonly PocketDropAniHelperPool _pool        = new PocketDropAniHelperPool();
+    // 活跃动画列表：同一帧可容纳任意数量的并发落袋动画
+    private readonly List<ActiveDrop>        _activeDrops = new List<ActiveDrop>();
 
-    private PocketDropAniHelper _dropHelper = new PocketDropAniHelper();
-    private Color               _baseColor;
+    // ── 公共 API ──────────────────────────────────────────────────────────────
 
-    void Awake()
+    /// <summary>单球落袋入口。当物理层检测到一颗球落袋时调用。</summary>
+    /// <param name="ballTransform">落袋球的 Transform，用于读取起始位置并在动画中更新位置/缩放。</param>
+    /// <param name="ballRenderer">落袋球的 Renderer，用于更新材质 alpha。</param>
+    /// <param name="pocketWorldPos">球袋中心的世界坐标。</param>
+    public void OnBallPocketed(Transform ballTransform, Renderer ballRenderer, Vector3 pocketWorldPos)
     {
-        _baseColor = ballRenderer.material.color;
+        StartOneDrop(ballTransform, ballRenderer, pocketWorldPos);
     }
 
-    // 当物理层检测到球落袋时调用
-    public void OnBallPocketed(Vector3 ballWorldPos, Vector3 pocketWorldPos)
+    /// <summary>
+    /// 多球同时落袋入口。同一帧内每颗球都会获得独立的 helper 实例，
+    /// 与逐一调用 OnBallPocketed 等价，此重载更简洁。
+    /// </summary>
+    /// <param name="drops">
+    /// 本次落袋的球列表，每个元素包含：球的 Transform、Renderer 和目标球袋的世界坐标。
+    /// </param>
+    public void OnBallsPocketed(
+        IReadOnlyList<(Transform ball, Renderer renderer, Vector3 pocketWorldPos)> drops)
     {
+        foreach (var (ball, renderer, pocketWorldPos) in drops)
+            StartOneDrop(ball, renderer, pocketWorldPos);
+    }
+
+    // ── 内部：从池取出 helper，配置并加入活跃列表 ─────────────────────────────
+    private void StartOneDrop(Transform ballTransform, Renderer ballRenderer, Vector3 pocketWorldPos)
+    {
+        PocketDropAniHelper helper = _pool.Rent();
+
         var req = new PocketDropRequest
         {
-            startPos        = ballWorldPos,
+            startPos        = ballTransform.position,
             pocketPos       = pocketWorldPos,
             duration        = 0.25f,
             sinkDepth       = 0.18f,
@@ -275,23 +332,42 @@ public class BallDropController : MonoBehaviour
             vanishRatio     = 0.20f,
             attractStrength = 0.25f,
         };
-        _dropHelper.StartDrop(in req);
+        helper.StartDrop(in req);
+
+        _activeDrops.Add(new ActiveDrop
+        {
+            BallTransform = ballTransform,
+            BallRenderer  = ballRenderer,
+            BaseColor     = ballRenderer.material.color,
+            Helper        = helper,
+        });
     }
 
+    // ── Update：驱动所有活跃落袋动画 ─────────────────────────────────────────
     void Update()
     {
-        if (_dropHelper.IsRunning)
+        // 倒序遍历，便于在循环中安全移除已完成的条目
+        for (int i = _activeDrops.Count - 1; i >= 0; i--)
         {
-            PocketDropState state = _dropHelper.Update(Time.deltaTime);
+            ActiveDrop      drop  = _activeDrops[i];
+            PocketDropState state = drop.Helper.Update(Time.deltaTime);
 
-            // 将状态应用到球的 Transform 和材质（渲染层自行负责）
-            ballTransform.position   = state.position;
-            ballTransform.localScale = Vector3.one * state.scale;
-            ballRenderer.material.color = new Color(
-                _baseColor.r, _baseColor.g, _baseColor.b, state.alpha);
+            // 将状态应用到 Transform 和材质
+            drop.BallTransform.position      = state.position;
+            drop.BallTransform.localScale    = Vector3.one * state.scale;
+            drop.BallRenderer.material.color = new Color(
+                drop.BaseColor.r, drop.BaseColor.g, drop.BaseColor.b, state.alpha);
 
             if (state.phase == PocketDropPhase.Finished)
-                gameObject.SetActive(false);  // 或归还对象池，由调用方决定
+            {
+                // 回收点：动画完整播完后归还 helper 到池
+                _pool.Return(drop.Helper);
+
+                // 隐藏球对象；也可在此处将球归还球对象池，由上层调用方决定
+                drop.BallTransform.gameObject.SetActive(false);
+
+                _activeDrops.RemoveAt(i);
+            }
         }
     }
 }
