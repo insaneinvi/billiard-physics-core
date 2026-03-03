@@ -34,6 +34,8 @@ Assets/BilliardPhysics/
 │   │   └── CueStrike.cs                  # 球杆击打
 │   ├── AimAssist/
 │   │   └── AimAssistRenderer.cs          # 击球辅助线 MonoBehaviour（LineRenderer 渲染）
+│   ├── AniHelp/
+│   │   └── PocketDropAniHelper.cs        # 球落袋动画纯逻辑辅助（三段式：吸引→下沉→消失）
 │   └── Table/
 │       ├── TableDefinition.cs            # 台面配置（ScriptableObject，传统方式）
 │       ├── PocketDefinition.cs           # 球袋配置（ScriptableObject，传统方式）
@@ -228,6 +230,107 @@ public class AimController : MonoBehaviour
 **隐藏/清除：**
 - `aimAssist.Clear()` — 清除所有线段并隐藏
 - `aimAssist.Hide()` — 仅隐藏，不清除内部数据
+
+### 7. 球落袋动画（PocketDropAniHelper）
+
+`PocketDropAniHelper` 是一个纯逻辑、无 GC 分配的动画辅助类，驱动三段式"球落袋"视觉效果：
+
+1. **Attract（吸引）** — 球从当前位置平滑滑向球袋方向（EaseOut）
+2. **Sink（下沉）**   — 球沿世界 `-Z` 方向下沉（EaseIn）
+3. **Vanish（消失）** — 球缩放至 0、alpha 渐隐至 0（EaseIn）
+
+完全解耦渲染层：不持有任何 `MonoBehaviour`、`Transform`、`Renderer` 或 `Material` 引用，一个实例可复用（对象池友好）。
+
+**使用示例：**
+
+```csharp
+using BilliardPhysics.AniHelp;
+using UnityEngine;
+
+public class BallDropController : MonoBehaviour
+{
+    // 在 Inspector 或代码中赋值
+    public Transform    ballTransform;
+    public Renderer     ballRenderer;
+
+    private PocketDropAniHelper _dropHelper = new PocketDropAniHelper();
+    private Color               _baseColor;
+
+    void Awake()
+    {
+        _baseColor = ballRenderer.material.color;
+    }
+
+    // 当物理层检测到球落袋时调用
+    public void OnBallPocketed(Vector3 ballWorldPos, Vector3 pocketWorldPos)
+    {
+        var req = new PocketDropRequest
+        {
+            startPos        = ballWorldPos,
+            pocketPos       = pocketWorldPos,
+            duration        = 0.25f,
+            sinkDepth       = 0.18f,
+            attractRatio    = 0.30f,
+            sinkRatio       = 0.50f,
+            vanishRatio     = 0.20f,
+            attractStrength = 0.25f,
+        };
+        _dropHelper.StartDrop(in req);
+    }
+
+    void Update()
+    {
+        if (_dropHelper.IsRunning)
+        {
+            PocketDropState state = _dropHelper.Update(Time.deltaTime);
+
+            // 将状态应用到球的 Transform 和材质（渲染层自行负责）
+            ballTransform.position   = state.position;
+            ballTransform.localScale = Vector3.one * state.scale;
+            ballRenderer.material.color = new Color(
+                _baseColor.r, _baseColor.g, _baseColor.b, state.alpha);
+
+            if (state.phase == PocketDropPhase.Finished)
+                gameObject.SetActive(false);  // 或归还对象池，由调用方决定
+        }
+    }
+}
+```
+
+**PocketDropRequest 参数一览：**
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `startPos` | — | 球落袋瞬间的世界坐标 |
+| `pocketPos` | — | 球袋中心的世界坐标 |
+| `duration` | 0.25 s | 整段动画总时长（≤ 0 使用默认值） |
+| `sinkDepth` | 0.18 | Sink 阶段沿 `-Z` 下沉的距离（物理单位，< 0 使用默认值） |
+| `attractRatio` | 0.30 | Attract 阶段占总时长的比例（无效时使用默认值并归一化） |
+| `sinkRatio` | 0.50 | Sink 阶段占总时长的比例（无效时使用默认值并归一化） |
+| `vanishRatio` | 0.20 | Vanish 阶段占总时长的比例（无效时使用默认值并归一化） |
+| `attractStrength` | 0.25 | Attract 阶段横向移动量占 startPos→pocketPos 距离的比例（≤ 0 使用默认值；典型范围 0..1，大于 1 表示球超过袋口位置） |
+
+**PocketDropState 字段一览：**
+
+| 字段 | 说明 |
+|------|------|
+| `position` | 当前帧建议的球世界坐标 |
+| `scale` | 均匀缩放值（Vanish 阶段 1 → 0） |
+| `alpha` | 不透明度（Vanish 阶段 1 → 0） |
+| `phase` | 当前阶段（`Attract` / `Sink` / `Vanish` / `Finished`） |
+| `normalizedTime` | 动画整体进度 0..1 |
+
+**公共 API：**
+
+| 方法 | 说明 |
+|------|------|
+| `StartDrop(in PocketDropRequest)` | 启动（或重置后重新启动）动画 |
+| `Update(float deltaTime)` | 按帧推进动画，返回当前 `PocketDropState`（无堆分配） |
+| `Evaluate(float normalizedTime)` | 在任意归一化时间采样动画状态，不修改内部状态 |
+| `Stop()` | 立即停止动画（不标记为 Finished） |
+| `Reset()` | 重置为初始空闲状态，适用于归还对象池前调用 |
+| `IsRunning` | 动画是否正在播放 |
+| `IsFinished` | 动画是否已完成 |
 
 ## 物理参数说明
 
