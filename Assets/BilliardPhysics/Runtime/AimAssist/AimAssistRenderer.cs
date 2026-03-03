@@ -137,10 +137,28 @@ namespace BilliardPhysics.AimAssist
         private LineRenderer _cueBallPostLineOutline;
         private LineRenderer _targetBallPostLineOutline;
 
+        // Runtime capsule-line material (created when LineMaterial is null; destroyed in OnDestroy).
+        private Material _capsuleLineMat;
+
+        // Reusable property block for setting per-renderer shader properties.
+        private MaterialPropertyBlock _propBlock;
+
         // ── MonoBehaviour lifecycle ───────────────────────────────────────────────
 
         private void Awake()
         {
+            // Create a runtime capsule-line material when the user has not supplied one.
+            _propBlock = new MaterialPropertyBlock();
+            if (LineMaterial == null)
+            {
+                var shader = Shader.Find("BilliardPhysics/AimAssist/CapsuleLine");
+                if (shader != null)
+                    _capsuleLineMat = new Material(shader) { hideFlags = HideFlags.HideAndDontSave };
+                else
+                    Debug.LogWarning("[AimAssistRenderer] Shader 'BilliardPhysics/AimAssist/CapsuleLine' not found. " +
+                                     "Line renderers will use the default Unity material.", this);
+            }
+
             // Outline renderers are created first (sortingOrder 0) so they render behind.
             _pathLineOutline           = CreateLineRenderer("AimAssist_Path_Outline",           sortingOrder: 0);
             _ghostCircleOutline        = CreateLineRenderer("AimAssist_GhostCircle_Outline",    sortingOrder: 0);
@@ -152,6 +170,14 @@ namespace BilliardPhysics.AimAssist
             _ghostCircle        = CreateLineRenderer("AimAssist_GhostCircle",    sortingOrder: 1);
             _cueBallPostLine    = CreateLineRenderer("AimAssist_CueBallPost",    sortingOrder: 1);
             _targetBallPostLine = CreateLineRenderer("AimAssist_TargetBallPost", sortingOrder: 1);
+
+            // Apply capsule setup to line renderers only; ghost circle keeps original settings.
+            ApplyCapsuleSetup(_pathLine);
+            ApplyCapsuleSetup(_pathLineOutline);
+            ApplyCapsuleSetup(_cueBallPostLine);
+            ApplyCapsuleSetup(_cueBallPostLineOutline);
+            ApplyCapsuleSetup(_targetBallPostLine);
+            ApplyCapsuleSetup(_targetBallPostLineOutline);
 
             Clear();
         }
@@ -166,6 +192,12 @@ namespace BilliardPhysics.AimAssist
             DestroyChildGO(_ghostCircleOutline);
             DestroyChildGO(_cueBallPostLineOutline);
             DestroyChildGO(_targetBallPostLineOutline);
+
+            if (_capsuleLineMat != null)
+            {
+                Destroy(_capsuleLineMat);
+                _capsuleLineMat = null;
+            }
         }
 
         // ── Public API ────────────────────────────────────────────────────────────
@@ -528,6 +560,21 @@ namespace BilliardPhysics.AimAssist
             return lr;
         }
 
+        /// <summary>
+        /// Configures <paramref name="lr"/> for use with the capsule-line shader:
+        /// sets <c>textureMode = Stretch</c>, disables built-in cap vertices (the shader
+        /// handles the rounded ends), and assigns the runtime capsule material when
+        /// no user material was provided.
+        /// </summary>
+        private void ApplyCapsuleSetup(LineRenderer lr)
+        {
+            if (lr == null) return;
+            lr.textureMode    = LineTextureMode.Stretch;
+            lr.numCapVertices = 0;
+            if (_capsuleLineMat != null)
+                lr.material = _capsuleLineMat;
+        }
+
         /// <summary>Draws a two-point line with the given <paramref name="width"/>.</summary>
         private void DrawLine(LineRenderer lr, Vector3 start, Vector3 end, Color color, float width)
         {
@@ -541,6 +588,16 @@ namespace BilliardPhysics.AimAssist
             lr.positionCount = 2;
             lr.SetPosition(0, start);
             lr.SetPosition(1, end);
+
+            // Inform the capsule shader of the line's aspect ratio (length / width) so
+            // the SDF end-caps remain perfectly circular regardless of line length.
+            if (_propBlock != null)
+            {
+                float lineLength = Vector3.Distance(start, end);
+                float aspect     = width > 0f ? lineLength / width : 1f;
+                _propBlock.SetFloat("_Aspect", aspect);
+                lr.SetPropertyBlock(_propBlock);
+            }
         }
 
         /// <summary>Draws a circle approximation with the given <paramref name="width"/>.</summary>
