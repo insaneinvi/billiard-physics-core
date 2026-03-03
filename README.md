@@ -32,6 +32,8 @@ Assets/BilliardPhysics/
 │   │   ├── ImpulseResolver.cs            # 碰撞冲量解算
 │   │   ├── MotionSimulator.cs            # 摩擦力与运动积分
 │   │   └── CueStrike.cs                  # 球杆击打
+│   ├── AimAssist/
+│   │   └── AimAssistRenderer.cs          # 击球辅助线 MonoBehaviour（LineRenderer 渲染）
 │   └── Table/
 │       ├── TableDefinition.cs            # 台面配置（ScriptableObject，传统方式）
 │       ├── PocketDefinition.cs           # 球袋配置（ScriptableObject，传统方式）
@@ -147,6 +149,85 @@ void Update()
 // 重置所有球的速度和落袋状态，保留位置
 world.Reset();
 ```
+
+### 6. 击球辅助线（Aim Assist）
+
+`AimAssistRenderer` 是一个 Unity `MonoBehaviour` 组件，在场景中用 `LineRenderer` 实时绘制：
+- 白球到首次碰撞位置的路径线段
+- 碰撞位置的空心圆（表示白球触碰时的球心位置）
+- 若首次碰撞为球-球碰撞，额外绘制两球碰后的方向线
+
+**挂载方式：**
+1. 在场景任意 GameObject 上 **Add Component → BilliardPhysics → Aim Assist Renderer**（或在代码中 `AddComponent<AimAssistRenderer>()`）。
+2. 通过 Inspector 或代码调用 `SetPhysicsWorld(world)` 传入 `PhysicsWorld2D` 实例。
+3. 在 Inspector 中按需调整参数（球半径、最大检测距离、颜色、线宽、速度比例等）。
+
+**使用示例：**
+
+```csharp
+using BilliardPhysics;
+using BilliardPhysics.AimAssist;
+using UnityEngine;
+
+public class AimController : MonoBehaviour
+{
+    // 在 Inspector 中赋值
+    public AimAssistRenderer aimAssist;
+
+    private PhysicsWorld2D _world;
+
+    void Start()
+    {
+        // 创建并配置物理世界 ...
+        _world = new PhysicsWorld2D();
+        // world.SetTableSegments(...);  world.AddBall(...); 等
+
+        aimAssist.SetPhysicsWorld(_world);
+    }
+
+    void Update()
+    {
+        if (IsPlayerAiming())
+        {
+            // 从物理坐标转为 Unity 世界坐标（Z 视需求设置）
+            Ball cueBall = _world.Balls[0];
+            Vector3 cueBallPos = new Vector3(
+                cueBall.Position.X.ToFloat(),
+                cueBall.Position.Y.ToFloat(),
+                0f);
+
+            // cueDirection 可来自鼠标、摇杆等输入
+            Vector3 cueDir = new Vector3(inputX, inputY, 0f);
+
+            aimAssist.DrawAimAssist(cueBallPos, cueDir);
+        }
+        else
+        {
+            aimAssist.Clear();
+        }
+    }
+}
+```
+
+**可配置参数一览：**
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `BallRadius` | 0.28575 | 白球半径（物理单位） |
+| `MaxDistance` | 10 | 最大检测/绘制距离 |
+| `CircleSegments` | 32 | 空心圆的折线段数 |
+| `LineWidth` | 0.02 | 所有线段宽度（世界单位） |
+| `PathColor` | 白色 | 路径线段颜色 |
+| `GhostCircleColor` | 白色 | 空心圆颜色 |
+| `CueBallPostColor` | 白色 | 白球碰后方向线颜色 |
+| `TargetBallPostColor` | 黄色 | 目标球碰后方向线颜色 |
+| `LineMaterial` | null | 自定义材质（留空使用 Unity 默认） |
+| `V0` | 1.0 | 参考速度（仅影响碰后线段长度比例） |
+| `ScaleFactor` | 1.0 | 碰后线段长度 = 速度分量 × ScaleFactor |
+
+**隐藏/清除：**
+- `aimAssist.Clear()` — 清除所有线段并隐藏
+- `aimAssist.Hide()` — 仅隐藏，不清除内部数据
 
 ## 物理参数说明
 
