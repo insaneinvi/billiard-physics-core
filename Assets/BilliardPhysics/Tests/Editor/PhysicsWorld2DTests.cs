@@ -1193,12 +1193,19 @@ namespace BilliardPhysics.Tests
         }
 
         /// <summary>
-        /// When a ball is OUTSIDE the pocket's trigger radius, the rim segment must NOT
-        /// be tested.  Rim collision is intentionally limited to the pocket area to avoid
-        /// spurious bounces on the rest of the table.
+        /// When a ball is far enough from the pocket that its full sweep cannot reach the
+        /// pocket area this step, the rim segment must NOT be tested.  This preserves the
+        /// original intent (rim never interferes with normal play far from the pocket)
+        /// while allowing the extended activation for balls that CAN reach the pocket this
+        /// step (see <see cref="Step_HighSpeedBallApproachingPocketFromOutside_HitsRimAndDoesNotTunnel"/>).
+        ///
+        /// Geometry: pocket at origin, radius 50; ball at (-1000, 0), speed 500 mm/s,
+        /// dt = 1 s.  Max displacement = 500 + ball_radius + tolerance ≈ 501 units.
+        /// pocket.Radius + sweepReach ≈ 551, so distToPocket (1000) > 551 → broadphase
+        /// skips the rim entirely.
         /// </summary>
         [Test]
-        public void FindEarliestCollision_BallOutsidePocketApproachingRim_NoRimCollision()
+        public void FindEarliestCollision_BallFarFromPocket_RimNotTested()
         {
             // Pocket at origin radius 50; rim extends further than the pocket radius.
             var pocket = MakePocket(0f, 0f, 50f);
@@ -1207,8 +1214,8 @@ namespace BilliardPhysics.Tests
                 new FixVec2(Fix64.From(30), Fix64.From( 200)));
 
             var ball = new Ball(0);
-            // Ball is OUTSIDE the pocket area (dist = 100 > 50), heading toward the rim.
-            ball.Position       = new FixVec2(Fix64.From(-100), Fix64.Zero);
+            // Ball is 1000 units away — clearly beyond pocket.Radius + sweepReach (~551).
+            ball.Position       = new FixVec2(Fix64.From(-1000), Fix64.Zero);
             ball.LinearVelocity = new FixVec2(Fix64.From(500), Fix64.Zero);
 
             var balls    = new List<Ball>    { ball };
@@ -1219,7 +1226,7 @@ namespace BilliardPhysics.Tests
                 CCDSystem.FindEarliestCollision(balls, segments, pockets, Fix64.One);
 
             Assert.IsFalse(result.Hit,
-                "A ball outside the pocket area must not collide with the rim segment.");
+                "A ball too far to reach the pocket area in one step must not collide with the rim segment.");
         }
 
         /// <summary>
@@ -1518,6 +1525,105 @@ namespace BilliardPhysics.Tests
                 $"Ball must be deflected by the segment vertex (cushion-vertex tunnelling fix). " +
                 $"Position.X={ball.Position.X.ToFloat():F3}, " +
                 $"LinearVelocity.X={ball.LinearVelocity.X.ToFloat():F1}");
+        }
+
+        // ── High-speed pocket-mouth tunneling regression ──────────────────────────
+
+        /// <summary>
+        /// Regression test: a ball placed just outside the pocket trigger radius and
+        /// given a very high speed directed into the pocket must NOT tunnel through the
+        /// pocket area without contacting the rim segment.
+        ///
+        /// Root cause of the original bug:
+        ///   The rim segment was only tested when <c>distToPocket &lt; pocket.Radius</c>
+        ///   (ball already inside the pocket area).  A ball starting just outside with
+        ///   speed ~20 000 mm/s travels ~333 units per 1/60 s step — far beyond the
+        ///   pocket radius (60 units) — so it jumped over the entire pocket area in one
+        ///   sub-step without ever being tested against the rim.
+        ///
+        /// Fix:
+        ///   The activation condition is extended to test the rim when the ball could
+        ///   reach the pocket area this step:
+        ///   <c>distToPocket &lt; pocket.Radius + ballSpeed*dt + ball.Radius + tolerance</c>.
+        ///   The CCD then correctly finds the rim collision before the ball exits.
+        ///
+        /// Acceptance:
+        ///   After one step the ball must have been stopped/deflected by the rim or
+        ///   captured by the pocket.  It must NOT be found on the far side of the pocket
+        ///   still travelling in the original direction (tunnelled).
+        /// </summary>
+        [Test]
+        public void Step_HighSpeedBallApproachingPocketFromOutside_HitsRimAndDoesNotTunnel()
+        {
+            var world = new PhysicsWorld2D();
+
+            // Pocket centred at (300, 0) with trigger radius 60.
+            var pocket = MakePocket(300f, 0f, 60f);
+            // Rim at the pocket entrance face (x = 300), blocking +X travel.
+            pocket.RimSegment = new Segment(
+                new FixVec2(Fix64.From(300), Fix64.From(-100)),
+                new FixVec2(Fix64.From(300), Fix64.From( 100)));
+            pocket.RimSegment.Restitution = BilliardsPhysicsDefaults.PocketRimRestitution;
+            world.AddPocket(pocket);
+
+            var ball = new Ball(0);
+            // Ball starts just outside the pocket area: dist from (300,0) = 70 > 60.
+            // Without the fix, distToPocket (70) >= pocket.Radius (60) skips the rim,
+            // and at 20 000 mm/s the ball travels ~333 units past the pocket in one step.
+            ball.Position       = new FixVec2(Fix64.From(230), Fix64.Zero);
+            ball.LinearVelocity = new FixVec2(Fix64.From(20000), Fix64.Zero);
+            world.AddBall(ball);
+
+            world.Step();
+
+            // The ball must NOT have tunnelled: either it was pocketed, bounced back
+            // (velocity reversed), or its position was stopped before/at the rim.
+            bool tunnelled = !ball.IsPocketed
+                          && ball.Position.X > Fix64.From(300) + ball.Radius
+                          && ball.LinearVelocity.X > Fix64.Zero;
+
+            Assert.IsFalse(tunnelled,
+                $"Ball must not tunnel through pocket area at high speed " +
+                $"(high-speed pocket-mouth tunneling fix). " +
+                $"Position.X={ball.Position.X.ToFloat():F2}, " +
+                $"Velocity.X={ball.LinearVelocity.X.ToFloat():F1}, " +
+                $"Pocketed={ball.IsPocketed}");
+        }
+
+        /// <summary>
+        /// Variant: ball placed slightly inside the pocket trigger radius at very high
+        /// speed must also be stopped by the rim (not allowed to exit through the far
+        /// side at speed).  This confirms the existing inside-pocket path is unaffected.
+        /// </summary>
+        [Test]
+        public void Step_HighSpeedBallInsidePocketNearEdge_HitsRimAndDoesNotTunnel()
+        {
+            var world = new PhysicsWorld2D();
+
+            var pocket = MakePocket(300f, 0f, 60f);
+            pocket.RimSegment = new Segment(
+                new FixVec2(Fix64.From(300), Fix64.From(-100)),
+                new FixVec2(Fix64.From(300), Fix64.From( 100)));
+            pocket.RimSegment.Restitution = BilliardsPhysicsDefaults.PocketRimRestitution;
+            world.AddPocket(pocket);
+
+            var ball = new Ball(0);
+            // Ball starts inside the pocket area: dist from (300,0) = 50 < 60.
+            ball.Position       = new FixVec2(Fix64.From(250), Fix64.Zero);
+            ball.LinearVelocity = new FixVec2(Fix64.From(20000), Fix64.Zero);
+            world.AddBall(ball);
+
+            world.Step();
+
+            bool tunnelled = !ball.IsPocketed
+                          && ball.Position.X > Fix64.From(300) + ball.Radius
+                          && ball.LinearVelocity.X > Fix64.Zero;
+
+            Assert.IsFalse(tunnelled,
+                $"Ball inside pocket area must not tunnel through rim at high speed. " +
+                $"Position.X={ball.Position.X.ToFloat():F2}, " +
+                $"Velocity.X={ball.LinearVelocity.X.ToFloat():F1}, " +
+                $"Pocketed={ball.IsPocketed}");
         }
     }
 }

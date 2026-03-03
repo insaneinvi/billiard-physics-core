@@ -420,20 +420,31 @@ namespace BilliardPhysics
                     }
                 }
 
-                // Requirement 2: when the ball is inside a pocket's trigger radius, also
-                // test the pocket's RimSegment as a solid obstacle.  The rim is only
-                // activated inside the pocket area so that it never interferes with normal
-                // cushion reflections on the rest of the table.  Its Restitution is set to
-                // a low value (PocketRimRestitution) so that the ball loses most of its
-                // normal velocity on contact, slowing it below PocketSinkSpeedThreshold so
-                // that CheckPocketCaptures can subsequently capture it.
+                // Requirement 2: test the pocket's RimSegment as a solid obstacle when the
+                // ball is inside the pocket area OR close enough to enter it this step.
+                // The original condition ("only when already inside") allowed high-speed
+                // balls to tunnel through the pocket mouth in a single sub-step without
+                // ever having the rim tested, because distToPocket >= pocket.Radius at the
+                // start of the step.  The fix extends activation to any ball whose sweep
+                // can reach the pocket area within this dt, matching the broadphase pattern
+                // already used for cushion segments.  The rim still ignores balls that are
+                // unambiguously too far away (pocket.Radius + sweepReach), so it never
+                // interferes with normal cushion reflections elsewhere on the table.
+                // Its Restitution is set to a low value (PocketRimRestitution) so that the
+                // ball loses most of its normal velocity on contact, slowing it below
+                // PocketSinkSpeedThreshold so that CheckPocketCaptures can subsequently
+                // capture it.
                 for (int pi = 0; pi < pockets.Count; pi++)
                 {
                     Pocket pocket = pockets[pi];
                     if (pocket.RimSegment == null) continue;
 
                     Fix64 distToPocket = FixVec2.Distance(ball.Position, pocket.Center);
-                    if (distToPocket >= pocket.Radius) continue;  // only active inside pocket area
+                    // Broadphase: skip only when ball cannot possibly reach the pocket area
+                    // this step.  sweepReach is computed here (after the rim-null guard) so
+                    // that the Magnitude sqrt is paid only when at least one rim segment exists.
+                    Fix64 ballSweepRadius = ball.LinearVelocity.Magnitude * dt + ball.Radius + BroadphaseTolerance;
+                    if (distToPocket >= pocket.Radius + ballSweepRadius) continue;
 
                     NarrowPhaseSegmentCalls++;
                     Fix64   toi;
