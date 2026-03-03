@@ -39,17 +39,17 @@ public class BilliardWorld : MonoBehaviour
         var stepInterval = 1 / 60f;
         Time.fixedDeltaTime = stepInterval;
         
-        // var debug = new PhysicsWorld2DDebug();
-        // debug.SetTableGeometry(_physicsWorld.TableSegments, _physicsWorld.Pockets);
-        // debug.SetBalls(_physicsWorld.Balls);
-        // debug.SetDebug(true);
-        // pDebug = debug;
+        var debug = new PhysicsWorld2DDebug();
+        debug.SetTableGeometry(_physicsWorld.TableSegments, _physicsWorld.Pockets);
+        debug.SetBalls(_physicsWorld.Balls);
+        debug.SetDebug(true);
+        pDebug = debug;
     }
 
     private PhysicsWorld2DDebug pDebug;
     private void OnDestroy()
     {
-        // pDebug.Dispose();
+        pDebug.Dispose();
     }
 
     private void InitViewWorld(RackResult rackResult)
@@ -126,7 +126,7 @@ public class BilliardWorld : MonoBehaviour
     {
         var cueBall = _physicsWorld.Balls[0];
         var cueBallPos = new Vector3(cueBall.Position.X.ToFloat(), cueBall.Position.Y.ToFloat(), 0);
-        aimPoint = cueBallPos + new Vector3(0, 1, 0);
+        aimPoint = new Vector3(0, 1, cueBallPos.z);
         aimRenderer.UpdateAimPoint(aimPoint);
     }
 
@@ -152,8 +152,6 @@ public class BilliardWorld : MonoBehaviour
         if (isDragging && Input.GetMouseButton(0))
         {
             RayTouchPoint();
-            var cueBall = _physicsWorld.Balls[0];
-            var cueBallPos = new Vector3(cueBall.Position.X.ToFloat(), cueBall.Position.Y.ToFloat(), 0);
             aimRenderer.UpdateAimPoint(aimPoint);
         }
 
@@ -166,7 +164,23 @@ public class BilliardWorld : MonoBehaviour
     private void FixedUpdate()
     {
         _physicsWorld.Step();
+        if (_physicsWorld.StepPocketBalls.Count > 0)
+        {
+            
+        }
+        var cbml =  IsAllBallMotionless();
+        if (isAllBallMotionless && !cbml)
+        {
+            UpdateAllBallsPositionInfo();
+        }
+        isAllBallMotionless = cbml;
+        aimRenderer.SetPlayerAimState(isAllBallMotionless);
+        if(!isAllBallMotionless)
+            UpdateAllBallsPositionInfo();
+    }
 
+    private void UpdateAllBallsPositionInfo()
+    {
         foreach (var ball in _physicsWorld.Balls)
         {
             if(ball.IsPocketed)continue;
@@ -184,9 +198,6 @@ public class BilliardWorld : MonoBehaviour
             ballObj.transform.rotation = _ballRotations[ball.Id];
             ballShadowObj.transform.position = new Vector3( ballObj.transform.position.x + 0.1f,   ballObj.transform.position.y+0.05f, -0.1f );
         }
-
-        isAllBallMotionless = IsAllBallMotionless();
-        aimRenderer.SetPlayerAimState(isAllBallMotionless);
     }
 
     private bool IsAllBallMotionless()
@@ -202,7 +213,7 @@ public class BilliardWorld : MonoBehaviour
     {
         if (!isAllBallMotionless) return;
         FixVec2 direction = new FixVec2(Fix64.FromFloat(aimRenderer.cueDir.x), Fix64.FromFloat(aimRenderer.cueDir.y)).Normalized;
-        Fix64 strength = Fix64.From(136);
+        Fix64 strength = Fix64.From(80);
         _physicsWorld.ApplyCueStrike(cueBall, direction, strength, Fix64.Zero,Fix64.Zero);
     }
 }

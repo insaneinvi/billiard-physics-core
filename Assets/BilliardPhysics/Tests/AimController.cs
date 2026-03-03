@@ -43,7 +43,7 @@ public class AimController : MonoBehaviour
         if (isPlayerAiming)
         {
             var cueBall = _world.Balls[0];
-            cueBallPos = new(cueBall.Position.X.ToFloat(), cueBall.Position.Y.ToFloat(), -5);
+            cueBallPos = new(cueBall.Position.X.ToFloat(), cueBall.Position.Y.ToFloat(), -3);
             cue.transform.position = cueBallPos;
         }
         cue.SetActive(state);
