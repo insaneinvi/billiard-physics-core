@@ -2,7 +2,7 @@ Shader "BilliardPhysics/AimAssist/CapsuleLine"
 {
     // Renders a LineRenderer strip with:
     //  - Rounded capsule end-caps (SDF-based, no extra geometry required).
-    //  - Hard anti-aliased edges via fwidth / screen-space derivatives.
+    //  - Smooth anti-aliased edges via smoothstep + fwidth (stable at any distance).
     //
     // Requirements on the LineRenderer:
     //  - textureMode = LineTextureMode.Stretch  (uv.x goes 0→1 along the line).
@@ -82,9 +82,9 @@ Shader "BilliardPhysics/AimAssist/CapsuleLine"
                 float2 q = float2(max(abs(p.x) - halfLen, 0.0), p.y);
                 float  d = length(q) - 0.5;   // < 0 inside, 0 on surface, > 0 outside
 
-                // ── Hard anti-aliasing (~1-pixel transition) ─────────────────────
-                float fw    = fwidth(d);
-                float alpha = saturate(0.5 - d / max(fw, 1e-6));
+                // ── Smooth anti-aliasing (~1-pixel transition via smoothstep) ────
+                float fw    = max(fwidth(d), 1e-6);
+                float alpha = 1.0 - smoothstep(0.0, fw * 1.5, d);
 
                 fixed4 col = i.color;
                 col.a *= alpha;
