@@ -91,6 +91,16 @@ namespace BilliardPhysics.AimAssist
         [Tooltip("Optional material applied to all LineRenderers.  Leave null to use the default.")]
         public Material LineMaterial;
 
+        [Header("Outline")]
+        [Tooltip("When true, each line/circle is drawn with a thicker outline beneath it.")]
+        public bool EnableOutline = true;
+
+        [Tooltip("Color of the outline drawn behind every line and circle.")]
+        public Color OutlineColor = Color.black;
+
+        [Tooltip("Extra width added to LineWidth to produce the outline width.  Values below 0 are clamped to 0.")]
+        public float OutlineExtraWidth = 0.015f;
+
         [Header("Post-Collision")]
         [Tooltip("Reference speed used only for post-collision line lengths (must be > 0).")]
         public float V0 = 1f;
@@ -115,19 +125,33 @@ namespace BilliardPhysics.AimAssist
 
         // ── LineRenderers (created once in Awake) ─────────────────────────────────
 
+        // Main renderers (rendered on top, original color & width).
         private LineRenderer _pathLine;
         private LineRenderer _ghostCircle;
         private LineRenderer _cueBallPostLine;
         private LineRenderer _targetBallPostLine;
 
+        // Outline renderers (rendered beneath, thicker, outline color).
+        private LineRenderer _pathLineOutline;
+        private LineRenderer _ghostCircleOutline;
+        private LineRenderer _cueBallPostLineOutline;
+        private LineRenderer _targetBallPostLineOutline;
+
         // ── MonoBehaviour lifecycle ───────────────────────────────────────────────
 
         private void Awake()
         {
-            _pathLine           = CreateLineRenderer("AimAssist_Path");
-            _ghostCircle        = CreateLineRenderer("AimAssist_GhostCircle");
-            _cueBallPostLine    = CreateLineRenderer("AimAssist_CueBallPost");
-            _targetBallPostLine = CreateLineRenderer("AimAssist_TargetBallPost");
+            // Outline renderers are created first (sortingOrder 0) so they render behind.
+            _pathLineOutline           = CreateLineRenderer("AimAssist_Path_Outline",           sortingOrder: 0);
+            _ghostCircleOutline        = CreateLineRenderer("AimAssist_GhostCircle_Outline",    sortingOrder: 0);
+            _cueBallPostLineOutline    = CreateLineRenderer("AimAssist_CueBallPost_Outline",    sortingOrder: 0);
+            _targetBallPostLineOutline = CreateLineRenderer("AimAssist_TargetBallPost_Outline", sortingOrder: 0);
+
+            // Main renderers are created after (sortingOrder 1) so they render on top.
+            _pathLine           = CreateLineRenderer("AimAssist_Path",           sortingOrder: 1);
+            _ghostCircle        = CreateLineRenderer("AimAssist_GhostCircle",    sortingOrder: 1);
+            _cueBallPostLine    = CreateLineRenderer("AimAssist_CueBallPost",    sortingOrder: 1);
+            _targetBallPostLine = CreateLineRenderer("AimAssist_TargetBallPost", sortingOrder: 1);
 
             Clear();
         }
@@ -138,6 +162,10 @@ namespace BilliardPhysics.AimAssist
             DestroyChildGO(_ghostCircle);
             DestroyChildGO(_cueBallPostLine);
             DestroyChildGO(_targetBallPostLine);
+            DestroyChildGO(_pathLineOutline);
+            DestroyChildGO(_ghostCircleOutline);
+            DestroyChildGO(_cueBallPostLineOutline);
+            DestroyChildGO(_targetBallPostLineOutline);
         }
 
         // ── Public API ────────────────────────────────────────────────────────────
@@ -185,13 +213,15 @@ namespace BilliardPhysics.AimAssist
                 : origin2D + dir2D * MaxDistance;
 
             // ── 1. Path line: cueBallPosition → endPos2D ─────────────────────────
-            DrawLine(_pathLine, ToV3(origin2D, z), ToV3(endPos2D, z), PathColor);
+            DrawLineWithOutline(_pathLine, _pathLineOutline,
+                                ToV3(origin2D, z), ToV3(endPos2D, z), PathColor);
 
             if (!hit.HasHit) return;
 
             // ── 2. Ghost circle at P_hit ──────────────────────────────────────────
-            DrawCircle(_ghostCircle, ToV3(hit.PHit, z), BallRadius,
-                       CircleSegments, GhostCircleColor);
+            DrawCircleWithOutline(_ghostCircle, _ghostCircleOutline,
+                                  ToV3(hit.PHit, z), BallRadius,
+                                  CircleSegments, GhostCircleColor);
 
             // ── 3. Post-collision lines (ball-ball only) ──────────────────────────
             if (!hit.IsBallBall) return;
@@ -214,26 +244,30 @@ namespace BilliardPhysics.AimAssist
 
             // Draw cue-ball post-collision line from P_hit.
             Vector2 cueBallEnd = hit.PHit + v1After * ScaleFactor;
-            DrawLine(_cueBallPostLine,
-                     ToV3(hit.PHit, z),
-                     ToV3(cueBallEnd, z),
-                     CueBallPostColor);
+            DrawLineWithOutline(_cueBallPostLine, _cueBallPostLineOutline,
+                                ToV3(hit.PHit, z),
+                                ToV3(cueBallEnd, z),
+                                CueBallPostColor);
 
             // Draw target-ball post-collision line from target-ball centre.
             Vector2 targetBallEnd = hit.TargetBallCenter + v2After * ScaleFactor;
-            DrawLine(_targetBallPostLine,
-                     ToV3(hit.TargetBallCenter, z),
-                     ToV3(targetBallEnd, z),
-                     TargetBallPostColor);
+            DrawLineWithOutline(_targetBallPostLine, _targetBallPostLineOutline,
+                                ToV3(hit.TargetBallCenter, z),
+                                ToV3(targetBallEnd, z),
+                                TargetBallPostColor);
         }
 
         /// <summary>Disables all aim-assist LineRenderer GameObjects without clearing their data.</summary>
         public void Hide()
         {
-            SetActive(_pathLine,           false);
-            SetActive(_ghostCircle,        false);
-            SetActive(_cueBallPostLine,    false);
-            SetActive(_targetBallPostLine, false);
+            SetActive(_pathLine,                   false);
+            SetActive(_ghostCircle,                false);
+            SetActive(_cueBallPostLine,            false);
+            SetActive(_targetBallPostLine,         false);
+            SetActive(_pathLineOutline,            false);
+            SetActive(_ghostCircleOutline,         false);
+            SetActive(_cueBallPostLineOutline,     false);
+            SetActive(_targetBallPostLineOutline,  false);
         }
 
         /// <summary>Clears all LineRenderer positions and hides them.</summary>
@@ -243,6 +277,10 @@ namespace BilliardPhysics.AimAssist
             ClearLine(_ghostCircle);
             ClearLine(_cueBallPostLine);
             ClearLine(_targetBallPostLine);
+            ClearLine(_pathLineOutline);
+            ClearLine(_ghostCircleOutline);
+            ClearLine(_cueBallPostLineOutline);
+            ClearLine(_targetBallPostLineOutline);
         }
 
         // ── Collision-detection result ────────────────────────────────────────────
@@ -474,7 +512,7 @@ namespace BilliardPhysics.AimAssist
 
         // ── LineRenderer management ───────────────────────────────────────────────
 
-        private LineRenderer CreateLineRenderer(string childName)
+        private LineRenderer CreateLineRenderer(string childName, int sortingOrder = 0)
         {
             var go = new GameObject(childName);
             go.transform.SetParent(transform, worldPositionStays: false);
@@ -485,33 +523,36 @@ namespace BilliardPhysics.AimAssist
             lr.endWidth          = LineWidth;
             lr.positionCount     = 0;
             lr.loop              = false;
+            lr.sortingOrder      = sortingOrder;
             if (LineMaterial != null) lr.material = LineMaterial;
             return lr;
         }
 
-        private void DrawLine(LineRenderer lr, Vector3 start, Vector3 end, Color color)
+        /// <summary>Draws a two-point line with the given <paramref name="width"/>.</summary>
+        private void DrawLine(LineRenderer lr, Vector3 start, Vector3 end, Color color, float width)
         {
             if (lr == null) return;
             lr.gameObject.SetActive(true);
             lr.startColor    = color;
             lr.endColor      = color;
-            lr.startWidth    = LineWidth;
-            lr.endWidth      = LineWidth;
+            lr.startWidth    = width;
+            lr.endWidth      = width;
             lr.loop          = false;
             lr.positionCount = 2;
             lr.SetPosition(0, start);
             lr.SetPosition(1, end);
         }
 
+        /// <summary>Draws a circle approximation with the given <paramref name="width"/>.</summary>
         private void DrawCircle(LineRenderer lr, Vector3 centre, float radius,
-                                int segments, Color color)
+                                int segments, Color color, float width)
         {
             if (lr == null) return;
             lr.gameObject.SetActive(true);
             lr.startColor    = color;
             lr.endColor      = color;
-            lr.startWidth    = LineWidth;
-            lr.endWidth      = LineWidth;
+            lr.startWidth    = width;
+            lr.endWidth      = width;
             lr.loop          = true;
             lr.positionCount = segments;
 
@@ -524,6 +565,37 @@ namespace BilliardPhysics.AimAssist
                     centre.y + Mathf.Sin(angle) * radius,
                     centre.z));
             }
+        }
+
+        /// <summary>
+        /// Draws a line on <paramref name="main"/> (at <see cref="LineWidth"/>) and,
+        /// when <see cref="EnableOutline"/> is true, also on <paramref name="outline"/>
+        /// at the outline width.
+        /// </summary>
+        private void DrawLineWithOutline(LineRenderer main, LineRenderer outline,
+                                         Vector3 start, Vector3 end, Color color)
+        {
+            DrawLine(main, start, end, color, LineWidth);
+            if (EnableOutline)
+                DrawLine(outline, start, end, OutlineColor, OutlineWidth);
+            else
+                ClearLine(outline);
+        }
+
+        /// <summary>
+        /// Draws a circle on <paramref name="main"/> (at <see cref="LineWidth"/>) and,
+        /// when <see cref="EnableOutline"/> is true, also on <paramref name="outline"/>
+        /// at the outline width.
+        /// </summary>
+        private void DrawCircleWithOutline(LineRenderer main, LineRenderer outline,
+                                            Vector3 centre, float radius,
+                                            int segments, Color color)
+        {
+            DrawCircle(main, centre, radius, segments, color, LineWidth);
+            if (EnableOutline)
+                DrawCircle(outline, centre, radius, segments, OutlineColor, OutlineWidth);
+            else
+                ClearLine(outline);
         }
 
         private static void ClearLine(LineRenderer lr)
@@ -546,5 +618,8 @@ namespace BilliardPhysics.AimAssist
         // ── Coordinate conversion ─────────────────────────────────────────────────
 
         private static Vector3 ToV3(Vector2 v, float z) => new Vector3(v.x, v.y, z);
+
+        // Outline width = LineWidth + clamped extra; always >= LineWidth.
+        private float OutlineWidth => LineWidth + Mathf.Max(0f, OutlineExtraWidth);
     }
 }
