@@ -45,7 +45,7 @@ namespace BilliardPhysics
             Fix64 five  = Fix64.From(5);
             Inertia = two / five * mass * radius * radius;
 
-            Restitution     = Fix64.From(95)  / Fix64.From(100);  // 0.95
+            Restitution     = Fix64.From(98)  / Fix64.From(100);  // 0.95
             SlidingFriction = Fix64.From(2)   / Fix64.From(10);   // 0.2
             RollingFriction = Fix64.From(1)   / Fix64.From(100);  // 0.01
             SpinFriction    = Fix64.From(5)   / Fix64.From(100);  // 0.05

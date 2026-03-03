@@ -7,12 +7,14 @@ using BilliardPhysics.Runtime.ViewTool;
 using UnityEngine;
 using Random = System.Random;
 
-public class BilliardTest : MonoBehaviour
+public class BilliardWorld : MonoBehaviour
 {
     
     public GameObject tempBall;
     public GameObject tempShadow;
 
+    public AimController aimRenderer;
+    
     private Texture[] ballTextures;
     // Start is called before the first frame update
     private Dictionary<int, GameObject> ballDict;
@@ -21,27 +23,33 @@ public class BilliardTest : MonoBehaviour
 
     private Ball cueBall;
     private PhysicsWorld2D _physicsWorld;
-
+    private Vector3 playerTouchPoint;
+    private Vector3 aimPoint;
     private bool isAllBallMotionless = false;
+    
+    private bool isDragging = false;
     void Start()
     {
-        var rackResult = BallRackHelper.GenerateRack();
+        var originRack = BallRackHelper.GenerateRack();
+        var rackResult = BallRackHelper.ConvertRackToRotated(originRack);
         InitPhysicsWorldAndBall(rackResult);
         InitViewWorld(rackResult);
+        InitAimData();
+        aimRenderer.BindPhysicsWorld(_physicsWorld);
         var stepInterval = 1 / 60f;
         Time.fixedDeltaTime = stepInterval;
         
-        var debug = new PhysicsWorld2DDebug();
-        debug.SetTableGeometry(_physicsWorld.TableSegments, _physicsWorld.Pockets);
-        debug.SetBalls(_physicsWorld.Balls);
-        debug.SetDebug(true);
-        pDebug = debug;
+        // var debug = new PhysicsWorld2DDebug();
+        // debug.SetTableGeometry(_physicsWorld.TableSegments, _physicsWorld.Pockets);
+        // debug.SetBalls(_physicsWorld.Balls);
+        // debug.SetDebug(true);
+        // pDebug = debug;
     }
 
     private PhysicsWorld2DDebug pDebug;
     private void OnDestroy()
     {
-        pDebug.Dispose();
+        // pDebug.Dispose();
     }
 
     private void InitViewWorld(RackResult rackResult)
@@ -88,7 +96,7 @@ public class BilliardTest : MonoBehaviour
     }
     private void InitPhysicsWorldAndBall(RackResult  rackResult)
     {
-        var physicsData = Resources.Load<TextAsset>("Data/tb8h_m");
+        var physicsData = Resources.Load<TextAsset>("Data/tb8v_m");
         var (tableSegments, pockets) = TableAndPocketBinaryLoader.Load(physicsData);
         _physicsWorld = new();
         foreach (var tableSegment in tableSegments)
@@ -111,6 +119,47 @@ public class BilliardTest : MonoBehaviour
             var objBall = new Ball(ob.Number);
             objBall.Position = new FixVec2(Fix64.FromFloat(ob.Position.x),  Fix64.FromFloat(ob.Position.y));
             _physicsWorld.AddBall(objBall);
+        }
+    }
+
+    private void InitAimData()
+    {
+        var cueBall = _physicsWorld.Balls[0];
+        var cueBallPos = new Vector3(cueBall.Position.X.ToFloat(), cueBall.Position.Y.ToFloat(), 0);
+        aimPoint = cueBallPos + new Vector3(0, 1, 0);
+        aimRenderer.UpdateAimPoint(aimPoint);
+    }
+
+    private void RayTouchPoint()
+    {
+        Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
+        RaycastHit hit;
+        if (Physics.Raycast(ray, out hit))
+        {
+            if (hit.collider.CompareTag("Table"))
+            {
+                aimPoint =  hit.point;
+            }
+        }
+    }
+    private void Update()
+    {
+        if (Input.GetMouseButtonDown(0))
+        {
+            isDragging = true;
+        }
+
+        if (isDragging && Input.GetMouseButton(0))
+        {
+            RayTouchPoint();
+            var cueBall = _physicsWorld.Balls[0];
+            var cueBallPos = new Vector3(cueBall.Position.X.ToFloat(), cueBall.Position.Y.ToFloat(), 0);
+            aimRenderer.UpdateAimPoint(aimPoint);
+        }
+
+        if (Input.GetMouseButtonUp(0))
+        {
+            isDragging = false;
         }
     }
 
@@ -137,7 +186,7 @@ public class BilliardTest : MonoBehaviour
         }
 
         isAllBallMotionless = IsAllBallMotionless();
-
+        aimRenderer.SetPlayerAimState(isAllBallMotionless);
     }
 
     private bool IsAllBallMotionless()
@@ -152,8 +201,8 @@ public class BilliardTest : MonoBehaviour
     public void OnShoot()
     {
         if (!isAllBallMotionless) return;
-        FixVec2 direction = new FixVec2(Fix64.One, Fix64.Zero).Normalized;
-        Fix64 strength = Fix64.From(60);
-        _physicsWorld.ApplyCueStrike(cueBall, direction, strength, BilliardsPhysicsDefaults.Ball_Radius/10 * (new Random().Next(2) - 1), BilliardsPhysicsDefaults.Ball_Radius/10 * (new Random().Next(2) - 1));
+        FixVec2 direction = new FixVec2(Fix64.FromFloat(aimRenderer.cueDir.x), Fix64.FromFloat(aimRenderer.cueDir.y)).Normalized;
+        Fix64 strength = Fix64.From(136);
+        _physicsWorld.ApplyCueStrike(cueBall, direction, strength, Fix64.Zero,Fix64.Zero);
     }
 }

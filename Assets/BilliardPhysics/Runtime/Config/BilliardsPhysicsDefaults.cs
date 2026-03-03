@@ -63,6 +63,6 @@ namespace BilliardPhysics
         /// real pocket jaw and slowing the ball enough to be captured on the next
         /// <see cref="PhysicsWorld2D.CheckPocketCaptures"/> call.
         /// </summary>
-        public static readonly Fix64 PocketRimRestitution = Fix64.FromFloat(0.1f, 4);
+        public static readonly Fix64 PocketRimRestitution = Fix64.FromFloat(0.02f, 4);
     }
 }
