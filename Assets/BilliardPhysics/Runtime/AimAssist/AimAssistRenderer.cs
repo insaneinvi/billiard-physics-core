@@ -140,6 +140,11 @@ namespace BilliardPhysics.AimAssist
         // Runtime capsule-line material (created when LineMaterial is null; destroyed in OnDestroy).
         private Material _capsuleLineMat;
 
+        // Runtime ghost-circle material (created when LineMaterial is null; destroyed in OnDestroy).
+        // Ghost circle does not use the capsule shader (UV layout is incompatible), so it gets its
+        // own material that supports vertex color and alpha blending.
+        private Material _ghostCircleMat;
+
         // Reusable property block for setting per-renderer shader properties.
         private MaterialPropertyBlock _propBlock;
 
@@ -157,6 +162,15 @@ namespace BilliardPhysics.AimAssist
                 else
                     Debug.LogWarning("[AimAssistRenderer] Shader 'BilliardPhysics/AimAssist/CapsuleLine' not found. " +
                                      "Line renderers will use the default Unity material.", this);
+
+                // Ghost circle does not use the capsule shader; give it a built-in shader that
+                // supports vertex color and alpha blending so it renders correctly by default.
+                var circleShader = Shader.Find("Sprites/Default");
+                if (circleShader != null)
+                    _ghostCircleMat = new Material(circleShader) { hideFlags = HideFlags.HideAndDontSave };
+                else
+                    Debug.LogWarning("[AimAssistRenderer] Shader 'Sprites/Default' not found. " +
+                                     "Ghost circle will use the default Unity material.", this);
             }
 
             // Outline renderers are created first (sortingOrder 0) so they render behind.
@@ -179,6 +193,13 @@ namespace BilliardPhysics.AimAssist
             ApplyCapsuleSetup(_targetBallPostLine);
             ApplyCapsuleSetup(_targetBallPostLineOutline);
 
+            // Apply ghost circle default material when LineMaterial was not provided.
+            if (_ghostCircleMat != null)
+            {
+                _ghostCircle.material        = _ghostCircleMat;
+                _ghostCircleOutline.material = _ghostCircleMat;
+            }
+
             Clear();
         }
 
@@ -197,6 +218,12 @@ namespace BilliardPhysics.AimAssist
             {
                 Destroy(_capsuleLineMat);
                 _capsuleLineMat = null;
+            }
+
+            if (_ghostCircleMat != null)
+            {
+                Destroy(_ghostCircleMat);
+                _ghostCircleMat = null;
             }
         }
 
