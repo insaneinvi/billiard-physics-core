@@ -138,6 +138,13 @@ namespace BilliardPhysics.AniHelp
         /// <summary>Recommended world position for the ball.</summary>
         public Vector3 position;
 
+        /// <summary>
+        /// Angular velocity (rad/s) for physically correct rolling (no-slip condition).
+        /// Computed as <c>Cross(Vector3.forward, linearVelocity) / ballRadius</c>.
+        /// Zero when the ball is stopped or the animation is finished.
+        /// </summary>
+        public Vector3 angularVelocity;
+
         /// <summary>Which animation phase is currently active.</summary>
         public PocketPostRollPhase phase;
 
@@ -177,12 +184,14 @@ namespace BilliardPhysics.AniHelp
         private float   _elapsed;
         private float   _duration;
         private bool    _isCueBall;
+        private float   _ballRadius;
 
         // Effective (possibly clipped) path data
         private Vector3[] _waypoints;          // full path waypoints
         private float[]   _cumulativeLengths;  // cumulative arc-length at each waypoint index
         private float     _totalLength;        // effective path length (≤ full length)
         private Vector3   _finalPosition;      // position at arc-length == _totalLength
+        private float     _startZ;             // Z of the first waypoint; held constant during rolling
 
         // ── Public API ────────────────────────────────────────────────────────
 
@@ -213,13 +222,16 @@ namespace BilliardPhysics.AniHelp
         /// </summary>
         public void Start(in PocketPostRollRequest req)
         {
-            _isCueBall = req.isCueBall;
-            _duration  = req.duration > 0f ? req.duration : DefaultDuration;
+            _isCueBall  = req.isCueBall;
+            _duration   = req.duration > 0f ? req.duration : DefaultDuration;
+            _ballRadius = req.ballRadius;
 
             // ── Build waypoints ───────────────────────────────────────────────
             _waypoints = (req.pathPoints != null && req.pathPoints.Length >= 2)
                 ? req.pathPoints
                 : null;
+
+            _startZ = (_waypoints != null) ? _waypoints[0].z : 0f;
 
             if (_waypoints == null)
             {
@@ -318,13 +330,25 @@ namespace BilliardPhysics.AniHelp
 
             if (t >= 1f || _totalLength <= 0f || _waypoints == null)
             {
-                state.phase    = PocketPostRollPhase.Finished;
-                state.position = _finalPosition;
+                state.phase           = PocketPostRollPhase.Finished;
+                state.position        = _finalPosition;
+                state.angularVelocity = Vector3.zero;
                 return state;
             }
 
+            float arcLen = t * _totalLength;
             state.phase    = PocketPostRollPhase.Rolling;
-            state.position = PositionAtArcLength(t * _totalLength);
+            state.position = PositionAtArcLength(arcLen);
+
+            // Angular velocity for physically correct rolling (no-slip condition):
+            //   ω = Cross(surfaceNormal, linearVelocity) / ballRadius
+            // Surface normal is Vector3.forward (Z-up, table in the XY plane).
+            Vector3 dir   = DirectionAtArcLength(arcLen);
+            float   speed = _duration > 0f ? _totalLength / _duration : 0f;
+            state.angularVelocity = _ballRadius > 0f
+                ? Vector3.Cross(Vector3.forward, dir * speed) / _ballRadius
+                : Vector3.zero;
+
             return state;
         }
 
@@ -351,13 +375,19 @@ namespace BilliardPhysics.AniHelp
         /// <summary>
         /// Returns the world-space position on the polyline at
         /// <paramref name="arcLen"/> distance from the start.
+        /// The Z component is always <c>_startZ</c> so the ball stays on the
+        /// flat table surface regardless of any Z variation in the waypoints.
         /// </summary>
         private Vector3 PositionAtArcLength(float arcLen)
         {
             if (_waypoints == null || _waypoints.Length == 0)
                 return Vector3.zero;
             if (arcLen <= 0f)
-                return _waypoints[0];
+            {
+                var p = _waypoints[0];
+                p.z = _startZ;
+                return p;
+            }
 
             int n = _waypoints.Length;
             for (int i = 1; i < n; i++)
@@ -370,10 +400,36 @@ namespace BilliardPhysics.AniHelp
                     float localT   = (segLen > 0f)
                         ? Mathf.Clamp01((arcLen - segStart) / segLen)
                         : 1f;
-                    return Vector3.LerpUnclamped(_waypoints[i - 1], _waypoints[i], localT);
+                    var pos = Vector3.LerpUnclamped(_waypoints[i - 1], _waypoints[i], localT);
+                    pos.z = _startZ;
+                    return pos;
                 }
             }
-            return _waypoints[n - 1];
+            var last = _waypoints[n - 1];
+            last.z = _startZ;
+            return last;
+        }
+
+        /// <summary>
+        /// Returns the normalised forward direction of the polyline segment that
+        /// contains <paramref name="arcLen"/>. Used for angular-velocity computation.
+        /// </summary>
+        private Vector3 DirectionAtArcLength(float arcLen)
+        {
+            if (_waypoints == null || _waypoints.Length < 2)
+                return Vector3.zero;
+
+            int n = _waypoints.Length;
+            for (int i = 1; i < n; i++)
+            {
+                if (arcLen <= _cumulativeLengths[i] || i == n - 1)
+                {
+                    Vector3 seg    = _waypoints[i] - _waypoints[i - 1];
+                    float   segLen = seg.magnitude;
+                    return segLen > 0f ? seg / segLen : Vector3.zero;
+                }
+            }
+            return Vector3.zero;
         }
 
         /// <summary>
@@ -428,9 +484,10 @@ namespace BilliardPhysics.AniHelp
         private PocketPostRollState BuildFinishedState()
         {
             PocketPostRollState state;
-            state.phase          = PocketPostRollPhase.Finished;
-            state.position       = _finalPosition;
-            state.normalizedTime = 1f;
+            state.phase           = PocketPostRollPhase.Finished;
+            state.position        = _finalPosition;
+            state.angularVelocity = Vector3.zero;
+            state.normalizedTime  = 1f;
             return state;
         }
     }

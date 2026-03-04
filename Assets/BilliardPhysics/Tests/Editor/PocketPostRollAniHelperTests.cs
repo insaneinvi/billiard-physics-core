@@ -258,6 +258,138 @@ namespace BilliardPhysics.Tests
             Assert.AreEqual(3f, stoppedAt.x, Eps);
         }
 
+        // ── Z-axis preservation ───────────────────────────────────────────────
+
+        [Test]
+        public void ZAxis_RemainsConstant_WhenWaypointsHaveSameZ()
+        {
+            // All waypoints at Z = 2. Ball should stay at Z = 2 throughout.
+            var h = MakeHelper();
+            h.Start(new PocketPostRollRequest
+            {
+                pathPoints = new[] { new Vector3(0f, 0f, 2f), new Vector3(10f, 0f, 2f) },
+                duration   = 1f,
+                ballRadius = 0.5f,
+            });
+
+            for (float t = 0f; t <= 1f; t += 0.1f)
+            {
+                PocketPostRollState state = h.Evaluate(t);
+                Assert.AreEqual(2f, state.position.z, Eps,
+                    $"Z should be constant at 2.0 at normalizedTime={t}");
+            }
+        }
+
+        [Test]
+        public void ZAxis_ClampedToStartZ_EvenIfWaypointsVaryZ()
+        {
+            // Waypoints with different Z values; Z must be locked to the first waypoint's Z.
+            float startZ = 5f;
+            var h = MakeHelper();
+            h.Start(new PocketPostRollRequest
+            {
+                pathPoints = new[]
+                {
+                    new Vector3(0f, 0f, startZ),
+                    new Vector3(5f, 0f, 3f),      // different Z
+                    new Vector3(10f, 0f, 7f),     // different Z
+                },
+                duration   = 1f,
+                ballRadius = 0.5f,
+            });
+
+            for (float t = 0f; t <= 1f; t += 0.25f)
+            {
+                PocketPostRollState state = h.Evaluate(t);
+                Assert.AreEqual(startZ, state.position.z, Eps,
+                    $"Z must stay locked to startZ={startZ} at normalizedTime={t}");
+            }
+        }
+
+        [Test]
+        public void ZAxis_FinalPosition_MatchesStartZ()
+        {
+            float startZ = 3f;
+            var h = MakeHelper();
+            h.Start(new PocketPostRollRequest
+            {
+                pathPoints = new[] { new Vector3(0f, 0f, startZ), new Vector3(8f, 0f, startZ) },
+                duration   = 1f,
+                ballRadius = 0.5f,
+            });
+
+            PocketPostRollState state = h.Update(2f); // overshoot → Finished
+
+            Assert.AreEqual(startZ, state.position.z, Eps, "Final position Z must equal startZ.");
+        }
+
+        // ── Angular velocity ──────────────────────────────────────────────────
+
+        [Test]
+        public void AngularVelocity_RollingAlongX_CorrectYComponent()
+        {
+            // Path along +X, length=10, duration=2, radius=0.5
+            // speed = 10/2 = 5 m/s
+            // dir = (1,0,0); ω = Cross(forward, dir*speed) / r
+            // = Cross((0,0,1),(5,0,0)) / 0.5 = (0,5,0) / 0.5 = (0,10,0)
+            float radius = 0.5f;
+            var h = MakeHelper();
+            h.Start(new PocketPostRollRequest
+            {
+                pathPoints = new[] { Vector3.zero, new Vector3(10f, 0f, 0f) },
+                duration   = 2f,
+                ballRadius = radius,
+            });
+
+            PocketPostRollState state = h.Evaluate(0.5f);
+
+            Assert.AreEqual(PocketPostRollPhase.Rolling, state.phase);
+            Assert.AreEqual(0f,  state.angularVelocity.x, Eps);
+            Assert.AreEqual(10f, state.angularVelocity.y, Eps);
+            Assert.AreEqual(0f,  state.angularVelocity.z, Eps);
+        }
+
+        [Test]
+        public void AngularVelocity_RollingAlongY_CorrectXComponent()
+        {
+            // Path along +Y, length=10, duration=2, radius=0.5
+            // speed = 5; dir = (0,1,0)
+            // ω = Cross((0,0,1),(0,5,0)) / 0.5 = (-5,0,0) / 0.5 = (-10,0,0)
+            float radius = 0.5f;
+            var h = MakeHelper();
+            h.Start(new PocketPostRollRequest
+            {
+                pathPoints = new[] { Vector3.zero, new Vector3(0f, 10f, 0f) },
+                duration   = 2f,
+                ballRadius = radius,
+            });
+
+            PocketPostRollState state = h.Evaluate(0.5f);
+
+            Assert.AreEqual(PocketPostRollPhase.Rolling, state.phase);
+            Assert.AreEqual(-10f, state.angularVelocity.x, Eps);
+            Assert.AreEqual(0f,   state.angularVelocity.y, Eps);
+            Assert.AreEqual(0f,   state.angularVelocity.z, Eps);
+        }
+
+        [Test]
+        public void AngularVelocity_IsZero_WhenFinished()
+        {
+            var h = MakeHelper();
+            h.Start(new PocketPostRollRequest
+            {
+                pathPoints = new[] { Vector3.zero, new Vector3(5f, 0f, 0f) },
+                duration   = 1f,
+                ballRadius = 0.5f,
+            });
+
+            PocketPostRollState state = h.Update(2f); // overshoot → Finished
+
+            Assert.AreEqual(PocketPostRollPhase.Finished, state.phase);
+            Assert.AreEqual(Vector3.zero, state.angularVelocity,
+                "Angular velocity must be zero after the animation finishes.");
+        }
+
         // ── Edge cases ────────────────────────────────────────────────────────
 
         [Test]
