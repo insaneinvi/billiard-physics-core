@@ -32,6 +32,13 @@ namespace BilliardPhysics
         public float       Radius                   = 0.1f;
         public float       ReboundVelocityThreshold = 1f;
         public SegmentData RimSegments              = new SegmentData();
+
+        /// <summary>
+        /// Optional post-pocket roll path.  After the drop animation finishes, the ball
+        /// rolls along Start → CP[0] → … → End.  Leave Start == End with no
+        /// ConnectionPoints to skip rolling entirely.
+        /// </summary>
+        public SegmentData PostPocketRollPath        = new SegmentData();
     }
 
     [AddComponentMenu("BilliardPhysics/Table And Pocket Authoring")]

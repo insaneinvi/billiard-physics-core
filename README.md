@@ -247,12 +247,42 @@ public class AimController : MonoBehaviour
 
 **helper 的回收点固定在 `PocketDropPhase.Finished`**：此时动画已完整播完，`Reset()` 后即可安全投入下一次使用。
 
+**Ball 是唯一权威数据源：Scale 用组合方式附加**
+
+`BallDropController` 以 `Ball`（物理层）实例作为唯一权威数据源——落袋动画的起始位置直接读自 `Ball.Position`，确保视觉与物理状态一致。
+
+`PocketDropState.scale` 描述的是动画期间的临时缩放，**不存入 `Ball` 的持久字段**。取而代之，控制器为每颗正在落袋的球动态创建一个 `BallScaleState` 组合对象，仅在动画期间有效；动画结束后该对象被丢弃，`Ball` 的核心状态模型保持干净。
+
+**落袋后滚动路径（PostPocketRollPath）**
+
+每个 `PocketConfig` 上都有一个可选字段 `PostPocketRollPath`（类型为 `SegmentData`），在 `TableAndPocketAuthoring` Inspector 中配置：
+
+- **Start** → **ConnectionPoints**（0..N 个中间路径点）→ **End** 构成完整滚动轨迹。
+- 当 `Start == End` 且 `ConnectionPoints` 为空时，视为"未配置"，跳过滚动阶段。
+- 路径在场景视图中以**橙色**折线显示（带方向箭头），便于编辑器内直观确认路径走向。
+
+**多球并发与碰撞停止规则**
+
+- 落袋动画（`_activeDrops`）和落袋后滚动（`_activeRolls`）各有独立的活跃列表，可同时驱动任意数量的球。
+- 滚动过程中，若当前球与**任何已停止的球**（之前落袋后滚到终点或被阻停的球，记录在 `_stoppedBalls`）发生接触（中心距 ≤ 两球半径之和），当前球立即停在接触位置，不再继续向 End 移动。
+- 新一局开始前调用 `ClearPocketedBalls()` 清空停止记录。
+
 **使用示例：**
 
 ```csharp
 using System.Collections.Generic;
+using BilliardPhysics;
 using BilliardPhysics.AniHelp;
 using UnityEngine;
+
+// ── Scale 组合对象（不是 Ball 的持久字段）────────────────────────────────────
+// Ball.cs 上无 scale 字段。BallDropController 在落袋动画期间临时为每颗球附加一个
+// BallScaleState；动画结束后该对象被丢弃，Ball 的核心状态模型保持干净。
+public sealed class BallScaleState
+{
+    /// <summary>当前均匀缩放值（Vanish 阶段 1 → 0）。仅落袋动画期间有效。</summary>
+    public float Scale = 1f;
+}
 
 // ── 轻量对象池：避免并发动画时频繁 new helper ─────────────────────────────────
 public sealed class PocketDropAniHelperPool
@@ -260,12 +290,10 @@ public sealed class PocketDropAniHelperPool
     private readonly Stack<PocketDropAniHelper> _stack = new Stack<PocketDropAniHelper>();
 
     /// <summary>取出一个 helper（池为空则新建）。</summary>
-    /// <returns>可直接调用 StartDrop 的 helper 实例。</returns>
     public PocketDropAniHelper Rent()
         => _stack.Count > 0 ? _stack.Pop() : new PocketDropAniHelper();
 
     /// <summary>归还 helper。归还前自动调用 Reset() 清除播放状态。</summary>
-    /// <param name="helper">待归还的 helper 实例。</param>
     public void Return(PocketDropAniHelper helper)
     {
         helper.Reset();
@@ -273,57 +301,97 @@ public sealed class PocketDropAniHelperPool
     }
 }
 
-// ── 单条并发动画的数据容器 ─────────────────────────────────────────────────────
-// 每颗同时在播的落袋动画对应一个 ActiveDrop，持有 Transform、Renderer、基础色和 helper。
+// ── 单条落袋动画的数据容器 ────────────────────────────────────────────────────
+// Ball 是唯一物理权威数据源；BallScaleState 是落袋期间的临时组合，不持久化到 Ball。
 internal sealed class ActiveDrop
 {
-    public Transform           BallTransform;
-    public Renderer            BallRenderer;
-    public Color               BaseColor;
-    public PocketDropAniHelper Helper;
+    public Ball            BallData;       // 物理权威：位置由此读取
+    public Transform       BallTransform;  // 渲染层 Transform
+    public Renderer        BallRenderer;   // 渲染层 Renderer
+    public Color           BaseColor;      // 落袋瞬间的基础颜色
+    public BallScaleState  ScaleState;     // 组合式缩放（动画结束后丢弃）
+    public PocketDropAniHelper Helper;     // 动画驱动（来自池）
+    public SegmentData     RollPath;       // 落袋后滚动路径（来自 PocketConfig.PostPocketRollPath）
+}
+
+// ── 落袋后滚动状态容器 ───────────────────────────────────────────────────────
+internal sealed class ActiveRoll
+{
+    public Ball       BallData;       // 物理权威（用于读取 Radius）
+    public Transform  BallTransform;  // 渲染层 Transform
+    public Vector3[]  Waypoints;      // 路径点：[Start, CP0, CP1, …, End]
+    public int        SegIdx;         // 当前所在子段索引
+    public float      SegT;           // 子段内插值进度 [0, 1]
+    public float      Speed;          // 滚动速度（世界单位 / 秒）
 }
 
 // ── 控制器 ────────────────────────────────────────────────────────────────────
 public class BallDropController : MonoBehaviour
 {
+    [Tooltip("落袋后球沿路径滚动的速度（世界单位 / 秒）")]
+    public float RollSpeed = 0.5f;
+
     // 对象池：在同一个 Controller 实例内复用 helper
     private readonly PocketDropAniHelperPool _pool        = new PocketDropAniHelperPool();
-    // 活跃动画列表：同一帧可容纳任意数量的并发落袋动画
+    // 活跃落袋动画列表：同一帧可容纳任意数量的并发落袋动画
     private readonly List<ActiveDrop>        _activeDrops = new List<ActiveDrop>();
+    // 活跃滚动列表：落袋动画完成后进入此列表
+    private readonly List<ActiveRoll>        _activeRolls = new List<ActiveRoll>();
+    // 已停止在路径上的球（位置 + 半径），供后续球碰撞检测使用
+    private readonly List<(Vector3 pos, float radius)> _stoppedBalls =
+        new List<(Vector3 pos, float radius)>();
 
     // ── 公共 API ──────────────────────────────────────────────────────────────
 
-    /// <summary>单球落袋入口。当物理层检测到一颗球落袋时调用。</summary>
-    /// <param name="ballTransform">落袋球的 Transform，用于读取起始位置并在动画中更新位置/缩放。</param>
-    /// <param name="ballRenderer">落袋球的 Renderer，用于更新材质 alpha。</param>
+    /// <summary>
+    /// 单球落袋入口。物理层检测到球落袋时调用。
+    /// Ball 的当前 Position 将作为动画的起始位置（唯一权威数据源）。
+    /// </summary>
+    /// <param name="ball">物理球对象（唯一权威数据源）。</param>
+    /// <param name="ballTransform">落袋球的 Transform，用于驱动渲染位置与缩放。</param>
+    /// <param name="ballRenderer">落袋球的 Renderer，用于驱动材质 alpha。</param>
     /// <param name="pocketWorldPos">球袋中心的世界坐标。</param>
-    public void OnBallPocketed(Transform ballTransform, Renderer ballRenderer, Vector3 pocketWorldPos)
+    /// <param name="rollPath">
+    /// 落袋后滚动路径（来自 <c>PocketConfig.PostPocketRollPath</c>）。
+    /// Start == End 且无 ConnectionPoints 时跳过滚动。
+    /// </param>
+    public void OnBallPocketed(
+        Ball ball, Transform ballTransform, Renderer ballRenderer,
+        Vector3 pocketWorldPos, SegmentData rollPath)
     {
-        StartOneDrop(ballTransform, ballRenderer, pocketWorldPos);
+        StartOneDrop(ball, ballTransform, ballRenderer, pocketWorldPos, rollPath);
     }
 
     /// <summary>
-    /// 多球同时落袋入口。同一帧内每颗球都会获得独立的 helper 实例，
-    /// 与逐一调用 OnBallPocketed 等价，此重载更简洁。
+    /// 多球同时落袋入口。同一帧内每颗球各得独立的 helper 实例，可并发播放。
     /// </summary>
-    /// <param name="drops">
-    /// 本次落袋的球列表，每个元素包含：球的 Transform、Renderer 和目标球袋的世界坐标。
-    /// </param>
     public void OnBallsPocketed(
-        IReadOnlyList<(Transform ball, Renderer renderer, Vector3 pocketWorldPos)> drops)
+        IReadOnlyList<(Ball ball, Transform t, Renderer r,
+                       Vector3 pocketWorldPos, SegmentData rollPath)> drops)
     {
-        foreach (var (ball, renderer, pocketWorldPos) in drops)
-            StartOneDrop(ball, renderer, pocketWorldPos);
+        foreach (var (ball, t, r, pocketWorldPos, rollPath) in drops)
+            StartOneDrop(ball, t, r, pocketWorldPos, rollPath);
     }
 
-    // ── 内部：从池取出 helper，配置并加入活跃列表 ─────────────────────────────
-    private void StartOneDrop(Transform ballTransform, Renderer ballRenderer, Vector3 pocketWorldPos)
-    {
-        PocketDropAniHelper helper = _pool.Rent();
+    /// <summary>新一局开始前调用，清除上一局已停球记录。</summary>
+    public void ClearPocketedBalls() => _stoppedBalls.Clear();
 
-        var req = new PocketDropRequest
+    // ── 内部：配置动画并加入活跃列表 ─────────────────────────────────────────
+    private void StartOneDrop(
+        Ball ball, Transform ballTransform, Renderer ballRenderer,
+        Vector3 pocketWorldPos, SegmentData rollPath)
+    {
+        // 从 Ball 读取落袋瞬间的位置（Ball 是唯一权威数据源）。
+        // Ball.Position 是 FixVec2（定点数 2D）；Z 轴取渲染层当前值保持平面一致。
+        Vector3 startPos = new Vector3(
+            ball.Position.X.ToFloat(),
+            ball.Position.Y.ToFloat(),
+            ballTransform.position.z);
+
+        PocketDropAniHelper helper = _pool.Rent();
+        helper.StartDrop(new PocketDropRequest
         {
-            startPos        = ballTransform.position,
+            startPos        = startPos,
             pocketPos       = pocketWorldPos,
             duration        = 0.25f,
             sinkDepth       = 0.18f,
@@ -331,53 +399,188 @@ public class BallDropController : MonoBehaviour
             sinkRatio       = 0.50f,
             vanishRatio     = 0.20f,
             attractStrength = 0.25f,
-        };
-        helper.StartDrop(in req);
+        });
+
+        // 为这颗球创建临时 Scale 组合对象（不是 Ball 字段）
+        var scaleState = new BallScaleState { Scale = 1f };
 
         _activeDrops.Add(new ActiveDrop
         {
+            BallData      = ball,
             BallTransform = ballTransform,
             BallRenderer  = ballRenderer,
             BaseColor     = ballRenderer.material.color,
+            ScaleState    = scaleState,
             Helper        = helper,
+            RollPath      = rollPath,
         });
     }
 
-    // ── Update：驱动所有活跃落袋动画 ─────────────────────────────────────────
+    // ── Update：驱动落袋动画与落袋后滚动 ─────────────────────────────────────
     void Update()
     {
-        // 倒序遍历，便于在循环中安全移除已完成的条目
+        // 1. 驱动落袋动画（倒序遍历，便于安全移除已完成条目）
         for (int i = _activeDrops.Count - 1; i >= 0; i--)
         {
             ActiveDrop      drop  = _activeDrops[i];
             PocketDropState state = drop.Helper.Update(Time.deltaTime);
 
-            // 将状态应用到 Transform 和材质
+            // 将 PocketDropState 回写渲染层（以 Ball 落袋瞬间状态为基准）
             drop.BallTransform.position      = state.position;
+            drop.ScaleState.Scale            = state.scale;   // Scale 保存在组合对象中
             drop.BallTransform.localScale    = Vector3.one * state.scale;
             drop.BallRenderer.material.color = new Color(
                 drop.BaseColor.r, drop.BaseColor.g, drop.BaseColor.b, state.alpha);
 
             if (state.phase == PocketDropPhase.Finished)
             {
-                // 回收点：动画完整播完后归还 helper 到池
+                // 回收点：归还 helper 到池；ScaleState 不再被引用，自然 GC
                 _pool.Return(drop.Helper);
 
-                // 隐藏球对象；也可在此处将球归还球对象池，由上层调用方决定
-                drop.BallTransform.gameObject.SetActive(false);
+                // 检查是否配置了有效的滚动路径
+                var path = drop.RollPath;
+                bool hasPath = path != null &&
+                               (path.Start != path.End ||
+                                (path.ConnectionPoints != null &&
+                                 path.ConnectionPoints.Count > 0));
+                if (hasPath)
+                {
+                    // 动画已完成，交棒给滚动阶段（恢复到正常缩放）
+                    drop.BallTransform.localScale = Vector3.one;
+                    StartRoll(drop.BallData, drop.BallTransform, path);
+                }
+                else
+                {
+                    // 无滚动路径：直接隐藏；也可在此归还球对象池
+                    drop.BallTransform.gameObject.SetActive(false);
+                }
 
                 _activeDrops.RemoveAt(i);
             }
         }
+
+        // 2. 驱动落袋后滚动
+        for (int i = _activeRolls.Count - 1; i >= 0; i--)
+        {
+            ActiveRoll roll    = _activeRolls[i];
+            bool       stopped = AdvanceRoll(roll, Time.deltaTime);
+
+            if (stopped)
+            {
+                // 记录停止位置，供后续球碰撞检测使用
+                _stoppedBalls.Add((
+                    roll.BallTransform.position,
+                    roll.BallData.Radius.ToFloat()));
+
+                // 隐藏；也可归还球对象池
+                roll.BallTransform.gameObject.SetActive(false);
+                _activeRolls.RemoveAt(i);
+            }
+        }
+    }
+
+    // ── 构建路径并加入活跃滚动列表 ────────────────────────────────────────────
+    private void StartRoll(Ball ball, Transform ballTransform, SegmentData path)
+    {
+        int cpCount = path.ConnectionPoints?.Count ?? 0;
+        // Waypoints: [Start, CP0, CP1, …, End]
+        var waypoints = new Vector3[cpCount + 2];
+        float z = ballTransform.position.z;
+        waypoints[0] = new Vector3(path.Start.x, path.Start.y, z);
+        for (int k = 0; k < cpCount; k++)
+            waypoints[k + 1] = new Vector3(
+                path.ConnectionPoints[k].x, path.ConnectionPoints[k].y, z);
+        waypoints[cpCount + 1] = new Vector3(path.End.x, path.End.y, z);
+
+        // 将球放置在路径起点
+        ballTransform.position = waypoints[0];
+
+        _activeRolls.Add(new ActiveRoll
+        {
+            BallData      = ball,
+            BallTransform = ballTransform,
+            Waypoints     = waypoints,
+            SegIdx        = 0,
+            SegT          = 0f,
+            Speed         = RollSpeed,
+        });
+    }
+
+    // ── 推进滚动；返回 true 表示停止（到达终点或撞上已停球）────────────────────
+    private bool AdvanceRoll(ActiveRoll roll, float deltaTime)
+    {
+        float selfRadius = roll.BallData.Radius.ToFloat();
+
+        while (deltaTime > 0f && roll.SegIdx < roll.Waypoints.Length - 1)
+        {
+            Vector3 from   = roll.Waypoints[roll.SegIdx];
+            Vector3 to     = roll.Waypoints[roll.SegIdx + 1];
+            float   segLen = Vector3.Distance(from, to);
+
+            if (segLen < 0.0001f)   // 退化子段，跳过
+            {
+                roll.SegIdx++;
+                continue;
+            }
+
+            float remaining = (1f - roll.SegT) * segLen;
+            float step      = roll.Speed * deltaTime;
+            Vector3 newPos;
+
+            if (step >= remaining)
+            {
+                newPos      = to;
+                roll.SegT   = 0f;
+                roll.SegIdx++;
+                deltaTime  -= remaining / roll.Speed;
+            }
+            else
+            {
+                roll.SegT += step / segLen;
+                deltaTime  = 0f;
+                newPos     = Vector3.Lerp(from, to, roll.SegT);
+            }
+
+            // 碰到已停止的球则立即停在接触位置
+            foreach (var (stoppedPos, stoppedRadius) in _stoppedBalls)
+            {
+                float contactDist = selfRadius + stoppedRadius;
+                if (Vector3.Distance(newPos, stoppedPos) <= contactDist)
+                {
+                    Vector3 dir = newPos - stoppedPos;
+                    if (dir.sqrMagnitude < 0.00001f) dir = Vector3.right;
+                    roll.BallTransform.position =
+                        stoppedPos + dir.normalized * contactDist;
+                    return true;
+                }
+            }
+
+            roll.BallTransform.position = newPos;
+        }
+
+        // 到达路径终点
+        return roll.SegIdx >= roll.Waypoints.Length - 1;
     }
 }
 ```
+
+**落袋后滚动路径配置（编辑器）**
+
+在场景中选中挂有 `TableAndPocketAuthoring` 的 GameObject，Inspector 中每个 Pocket 条目下均有 `Post Pocket Roll Path`（`SegmentData`）字段：
+
+| 字段 | 说明 |
+|------|------|
+| `Start` | 路径起点（球落袋后的出发点，通常设在落袋口附近） |
+| `Connection Points` | 中间路径点（0..N 个，拖动折点调整轨迹弯曲） |
+| `End` | 路径终点（球沿路径滚到此处或被阻停后隐藏） |
+
+场景视图中会以**橙色**折线 + 箭头实时预览路径走向。
 
 **PocketDropRequest 参数一览：**
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `startPos` | — | 球落袋瞬间的世界坐标 |
+| `startPos` | — | 球落袋瞬间的世界坐标（由 `Ball.Position` 转换而来） |
 | `pocketPos` | — | 球袋中心的世界坐标 |
 | `duration` | 0.25 s | 整段动画总时长（≤ 0 使用默认值） |
 | `sinkDepth` | 0.18 | Sink 阶段沿 `-Z` 下沉的距离（物理单位，< 0 使用默认值） |
@@ -391,7 +594,7 @@ public class BallDropController : MonoBehaviour
 | 字段 | 说明 |
 |------|------|
 | `position` | 当前帧建议的球世界坐标 |
-| `scale` | 均匀缩放值（Vanish 阶段 1 → 0） |
+| `scale` | 均匀缩放值（Vanish 阶段 1 → 0）；应用至 `BallScaleState.Scale` 及 `Transform.localScale` |
 | `alpha` | 不透明度（Vanish 阶段 1 → 0） |
 | `phase` | 当前阶段（`Attract` / `Sink` / `Vanish` / `Finished`） |
 | `normalizedTime` | 动画整体进度 0..1 |
