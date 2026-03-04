@@ -418,7 +418,7 @@ namespace BilliardPhysics.Editor
         // ── Fixed-Point Binary Export ──────────────────────────────────────
         // 0x59485042 is the uint whose little-endian bytes are 0x42,0x50,0x48,0x59 = 'B','P','H','Y'.
         private const uint   k_exportMagic   = 0x59485042u;
-        private const ushort k_exportVersion = 3;
+        private const ushort k_exportVersion = 4;
 
         private void ExportFixedBinary()
         {
@@ -499,13 +499,14 @@ namespace BilliardPhysics.Editor
                 EditorUtility.RevealInFinder(path);
         }
 
-        // ── Serialisation (version 3 format) ──────────────────────────
-        // Writes the fixed-point binary body (header + table segments + pockets)
-        // to <paramref name="writer"/>.  Separated from the UI flow so it can be
-        // called independently and tested without any dialog interaction.
+        // ── Serialisation (version 4 format) ──────────────────────────
+        // Writes the fixed-point binary body (header + table segments + pockets +
+        // PostPocketRollPath) to <paramref name="writer"/>.  Separated from the UI
+        // flow so it can be called independently and tested without any dialog.
         //
-        // Version 3 layout per segment:  Start(x,y) + End(x,y) + CPCount + CP[0..n-1]
+        // Version 4 layout per segment:  Start(x,y) + End(x,y) + CPCount + CP[0..n-1]
         // Pocket rim: no rimSegCount prefix; one rim segment (Start/End + CPs) per pocket.
+        // PostPocketRollPath: Start(x,y) + End(x,y) + CPCount + CP[0..n-1] (appended last).
         private static void WriteFixedBinaryBody(
             System.IO.BinaryWriter writer, TableAndPocketAuthoring auth)
         {
@@ -543,6 +544,14 @@ namespace BilliardPhysics.Editor
                 writer.Write(Fix64.FromFloat(rim.End.y).RawValue);
                 WriteConnectionPoints(writer, rim.ConnectionPoints);
             }
+
+            // PostPocketRollPath – appended after pockets (version 4 only).
+            var rollPath = auth.Table.PostPocketRollPath ?? new SegmentData();
+            writer.Write(Fix64.FromFloat(rollPath.Start.x).RawValue);
+            writer.Write(Fix64.FromFloat(rollPath.Start.y).RawValue);
+            writer.Write(Fix64.FromFloat(rollPath.End.x).RawValue);
+            writer.Write(Fix64.FromFloat(rollPath.End.y).RawValue);
+            WriteConnectionPoints(writer, rollPath.ConnectionPoints);
         }
 
         private static void WriteConnectionPoints(
@@ -592,9 +601,10 @@ namespace BilliardPhysics.Editor
 
             List<Segment> tableSegments;
             List<Pocket>  pockets;
+            Segment       rollPath;
             try
             {
-                TableAndPocketBinaryLoader.Load(bytes, out tableSegments, out pockets);
+                (tableSegments, pockets, rollPath) = TableAndPocketBinaryLoader.Load(bytes);
             }
             catch (System.IO.InvalidDataException ex)
             {
@@ -615,7 +625,7 @@ namespace BilliardPhysics.Editor
 
             var auth = (TableAndPocketAuthoring)target;
             Undo.RecordObject(target, "Load Fixed Binary");
-            auth.Table   = ImportFixedBinaryHelper.BuildTableConfig(tableSegments);
+            auth.Table   = ImportFixedBinaryHelper.BuildTableConfig(tableSegments, rollPath);
             auth.Pockets = ImportFixedBinaryHelper.BuildPocketConfigs(pockets);
             serializedObject.Update();
             EditorUtility.SetDirty(target);

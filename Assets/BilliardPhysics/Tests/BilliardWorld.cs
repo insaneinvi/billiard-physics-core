@@ -97,7 +97,7 @@ public class BilliardWorld : MonoBehaviour
     private void InitPhysicsWorldAndBall(RackResult  rackResult)
     {
         var physicsData = Resources.Load<TextAsset>("Data/tb8v_m");
-        var (tableSegments, pockets) = TableAndPocketBinaryLoader.Load(physicsData);
+        var (tableSegments, pockets, _) = TableAndPocketBinaryLoader.Load(physicsData);
         _physicsWorld = new();
         foreach (var tableSegment in tableSegments)
         {

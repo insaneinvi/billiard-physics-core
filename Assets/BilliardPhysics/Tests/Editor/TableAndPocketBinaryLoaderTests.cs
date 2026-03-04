@@ -85,7 +85,7 @@ namespace BilliardPhysics.Tests
                                rimSx: 3f, rimSy: 4f, rimEx: 5f, rimEy: 6f);
             });
 
-            var (segs, pockets) = TableAndPocketBinaryLoader.Load(blob);
+            var (segs, pockets, _) = TableAndPocketBinaryLoader.Load(blob);
 
             Assert.AreEqual(0, segs.Count);
             Assert.AreEqual(1, pockets.Count);
@@ -114,7 +114,7 @@ namespace BilliardPhysics.Tests
                                cps: cps);
             });
 
-            var (_, pockets) = TableAndPocketBinaryLoader.Load(blob);
+            var (_, pockets, _) = TableAndPocketBinaryLoader.Load(blob);
 
             Pocket p = pockets[0];
             Assert.IsNotNull(p.RimSegment);
@@ -140,7 +140,7 @@ namespace BilliardPhysics.Tests
                                cps: cps);
             });
 
-            var (_, pockets) = TableAndPocketBinaryLoader.Load(blob);
+            var (_, pockets, _) = TableAndPocketBinaryLoader.Load(blob);
             var configs = BilliardPhysics.Editor.ImportFixedBinaryHelper.BuildPocketConfigs(pockets);
 
             Assert.AreEqual(1, configs.Count);
@@ -219,6 +219,118 @@ namespace BilliardPhysics.Tests
 
                 Assert.Throws<InvalidDataException>(() => TableAndPocketBinaryLoader.Load(blob));
             }
+        }
+
+        // ── Helpers for v4 blobs (with PostPocketRollPath) ────────────────────
+
+        private static byte[] BuildBlobV4(Action<BinaryWriter> writePockets, Action<BinaryWriter> writeRollPath)
+        {
+            using (var ms = new MemoryStream())
+            using (var w  = new BinaryWriter(ms))
+            {
+                // Header
+                w.Write(k_magic);
+                w.Write((ushort)4); // version 4
+
+                // Table segments: none
+                w.Write(0);
+
+                // Pockets
+                writePockets(w);
+
+                // PostPocketRollPath
+                writeRollPath(w);
+
+                return ms.ToArray();
+            }
+        }
+
+        private static void WriteRollPath(
+            BinaryWriter w,
+            float sx, float sy, float ex, float ey,
+            IList<(float x, float y)> cps = null)
+        {
+            w.Write(ToRaw(sx));
+            w.Write(ToRaw(sy));
+            w.Write(ToRaw(ex));
+            w.Write(ToRaw(ey));
+            int cpCount = cps?.Count ?? 0;
+            w.Write(cpCount);
+            if (cps != null)
+                foreach (var (x, y) in cps)
+                {
+                    w.Write(ToRaw(x));
+                    w.Write(ToRaw(y));
+                }
+        }
+
+        // ── V4: PostPocketRollPath is returned and contains correct start/end ─
+
+        [Test]
+        public void LoadV4_PostPocketRollPath_NoCPs_ReturnsCorrectSegment()
+        {
+            byte[] blob = BuildBlobV4(
+                w => w.Write(0), // no pockets
+                w => WriteRollPath(w, sx: 1f, sy: 2f, ex: 3f, ey: 4f));
+
+            var (segs, pockets, rollPath) = TableAndPocketBinaryLoader.Load(blob);
+
+            Assert.IsNotNull(rollPath, "PostPocketRollPath must not be null for v4.");
+            Assert.AreEqual(1f, rollPath.Start.X.ToFloat(), 1e-4f);
+            Assert.AreEqual(2f, rollPath.Start.Y.ToFloat(), 1e-4f);
+            Assert.AreEqual(3f, rollPath.End.X.ToFloat(),   1e-4f);
+            Assert.AreEqual(4f, rollPath.End.Y.ToFloat(),   1e-4f);
+            Assert.AreEqual(0, rollPath.ConnectionPoints.Count, "No CPs expected.");
+        }
+
+        [Test]
+        public void LoadV4_PostPocketRollPath_WithCPs_ReturnsCPs()
+        {
+            var cps = new List<(float x, float y)> { (5f, 6f), (7f, 8f) };
+
+            byte[] blob = BuildBlobV4(
+                w => w.Write(0), // no pockets
+                w => WriteRollPath(w, sx: 0f, sy: 0f, ex: 10f, ey: 0f, cps: cps));
+
+            var (_, _, rollPath) = TableAndPocketBinaryLoader.Load(blob);
+
+            Assert.IsNotNull(rollPath);
+            Assert.AreEqual(2, rollPath.ConnectionPoints.Count);
+            Assert.AreEqual(5f, rollPath.ConnectionPoints[0].X.ToFloat(), 1e-4f);
+            Assert.AreEqual(6f, rollPath.ConnectionPoints[0].Y.ToFloat(), 1e-4f);
+            Assert.AreEqual(7f, rollPath.ConnectionPoints[1].X.ToFloat(), 1e-4f);
+            Assert.AreEqual(8f, rollPath.ConnectionPoints[1].Y.ToFloat(), 1e-4f);
+        }
+
+        // ── V3: PostPocketRollPath is null (backward compatibility) ───────────
+
+        [Test]
+        public void LoadV3_PostPocketRollPath_IsNull()
+        {
+            byte[] blob = BuildBlob(w => w.Write(0)); // v3 blob, no pockets
+
+            var (_, _, rollPath) = TableAndPocketBinaryLoader.Load(blob);
+
+            Assert.IsNull(rollPath,
+                "v3 assets have no PostPocketRollPath – loader must return null.");
+        }
+
+        // ── V4: PostPocketRollPath roundtrips through BuildTableConfig ────────
+
+        [Test]
+        public void LoadV4_BuildTableConfig_PostPocketRollPathPopulated()
+        {
+            byte[] blob = BuildBlobV4(
+                w => w.Write(0),
+                w => WriteRollPath(w, sx: 2f, sy: 3f, ex: 8f, ey: 9f));
+
+            var (segs, _, rollPath) = TableAndPocketBinaryLoader.Load(blob);
+            var tableConfig = BilliardPhysics.Editor.ImportFixedBinaryHelper.BuildTableConfig(segs, rollPath);
+
+            Assert.AreEqual(2f, tableConfig.PostPocketRollPath.Start.x, 1e-4f);
+            Assert.AreEqual(3f, tableConfig.PostPocketRollPath.Start.y, 1e-4f);
+            Assert.AreEqual(8f, tableConfig.PostPocketRollPath.End.x,   1e-4f);
+            Assert.AreEqual(9f, tableConfig.PostPocketRollPath.End.y,   1e-4f);
         }
     }
 }

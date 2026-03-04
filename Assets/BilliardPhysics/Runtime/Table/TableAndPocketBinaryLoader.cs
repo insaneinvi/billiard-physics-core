@@ -12,12 +12,14 @@ namespace BilliardPhysics
     public static class TableAndPocketBinaryLoader
     {
         /// <summary>'BPHY' magic: 0x59485042 whose little-endian bytes are 0x42,0x50,0x48,0x59 = 'B','P','H','Y'.</summary>
-        private const uint   k_magic      = 0x59485042u;
-        private const ushort k_version3   = 3;  // current: no rimSegCount; single rim segment with CPs
-        private const ushort k_version    = k_version3;
+        private const uint   k_magic    = 0x59485042u;
+        private const ushort k_version3 = 3;  // legacy: no PostPocketRollPath
+        private const ushort k_version4 = 4;  // current: appends PostPocketRollPath after pockets
+        private const ushort k_version  = k_version4;
 
         /// <summary>
-        /// Loads table segments and pockets from a binary <see cref="TextAsset"/>.
+        /// Loads table segments, pockets, and the post-pocket roll path from a binary
+        /// <see cref="TextAsset"/>.
         /// </summary>
         /// <param name="asset">The .bytes asset exported from the editor.</param>
         /// <param name="tableSegments">Reconstructed table wall segments.</param>
@@ -31,27 +33,30 @@ namespace BilliardPhysics
                                 out List<Pocket>  pockets)
         {
             if (asset == null) throw new ArgumentNullException(nameof(asset));
-            (tableSegments, pockets) = Load(asset.bytes);
+            (tableSegments, pockets, _) = Load(asset.bytes);
         }
 
         /// <summary>
-        /// Loads table segments and pockets from a binary <see cref="TextAsset"/>.
+        /// Loads table segments, pockets, and the post-pocket roll path from a binary
+        /// <see cref="TextAsset"/>.
         /// </summary>
         /// <param name="asset">The .bytes asset exported from the editor.</param>
-        /// <returns>A tuple of (tableSegments, pockets).</returns>
+        /// <returns>A tuple of (tableSegments, pockets, postPocketRollPath).
+        /// <c>postPocketRollPath</c> is <c>null</c> for version-3 assets.</returns>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="asset"/> is null.</exception>
         /// <exception cref="InvalidDataException">
         ///   Thrown when the magic number or version does not match, or the data is too short.
         /// </exception>
-        public static (List<Segment> tableSegments, List<Pocket> pockets) Load(TextAsset asset)
+        public static (List<Segment> tableSegments, List<Pocket> pockets, Segment postPocketRollPath)
+            Load(TextAsset asset)
         {
             if (asset == null) throw new ArgumentNullException(nameof(asset));
             return Load(asset.bytes);
         }
 
         /// <summary>
-        /// Loads table segments and pockets from a raw byte array produced by
-        /// <c>TableAndPocketAuthoringEditor.ExportFixedBinary</c>.
+        /// Loads table segments, pockets, and the post-pocket roll path from a raw byte array
+        /// produced by <c>TableAndPocketAuthoringEditor.ExportFixedBinary</c>.
         /// </summary>
         /// <param name="bytes">Raw bytes of the exported .bytes file.</param>
         /// <param name="tableSegments">Reconstructed table wall segments.</param>
@@ -64,20 +69,22 @@ namespace BilliardPhysics
                                 out List<Segment> tableSegments,
                                 out List<Pocket>  pockets)
         {
-            (tableSegments, pockets) = Load(bytes);
+            (tableSegments, pockets, _) = Load(bytes);
         }
 
         /// <summary>
-        /// Loads table segments and pockets from a raw byte array produced by
-        /// <c>TableAndPocketAuthoringEditor.ExportFixedBinary</c>.
+        /// Loads table segments, pockets, and the post-pocket roll path from a raw byte array
+        /// produced by <c>TableAndPocketAuthoringEditor.ExportFixedBinary</c>.
         /// </summary>
         /// <param name="bytes">Raw bytes of the exported .bytes file.</param>
-        /// <returns>A tuple of (tableSegments, pockets).</returns>
+        /// <returns>A tuple of (tableSegments, pockets, postPocketRollPath).
+        /// <c>postPocketRollPath</c> is <c>null</c> for version-3 assets.</returns>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="bytes"/> is null.</exception>
         /// <exception cref="InvalidDataException">
         ///   Thrown when the magic number or version does not match, or the data is too short.
         /// </exception>
-        public static (List<Segment> tableSegments, List<Pocket> pockets) Load(byte[] bytes)
+        public static (List<Segment> tableSegments, List<Pocket> pockets, Segment postPocketRollPath)
+            Load(byte[] bytes)
         {
             if (bytes == null) throw new ArgumentNullException(nameof(bytes));
 
@@ -87,7 +94,8 @@ namespace BilliardPhysics
             }
         }
 
-        private static (List<Segment> tableSegments, List<Pocket> pockets) ReadBinary(BinaryReader reader)
+        private static (List<Segment> tableSegments, List<Pocket> pockets, Segment postPocketRollPath)
+            ReadBinary(BinaryReader reader)
         {
             // ── Header ────────────────────────────────────────────────
             if (reader.BaseStream.Length < 6)
@@ -100,9 +108,9 @@ namespace BilliardPhysics
                     $"Invalid magic number: expected 0x{k_magic:X8} ('BPHY'), got 0x{magic:X8}.");
 
             ushort version = reader.ReadUInt16();
-            if (version != k_version3)
+            if (version != k_version3 && version != k_version4)
                 throw new InvalidDataException(
-                    $"Unsupported file version {version}. This loader supports version {k_version3}.");
+                    $"Unsupported file version {version}. This loader supports versions {k_version3} and {k_version4}.");
 
             // ── Table segments ────────────────────────────────────────
             int segCount = ReadInt32Safe(reader, "segment count");
@@ -146,7 +154,17 @@ namespace BilliardPhysics
                 pockets.Add(pocket);
             }
 
-            return (tableSegments, pockets);
+            // ── PostPocketRollPath (version 4 only) ───────────────────
+            Segment postPocketRollPath = null;
+            if (version == k_version4)
+            {
+                FixVec2       start = ReadFixVec2Safe(reader, "PostPocketRollPath start");
+                FixVec2       end   = ReadFixVec2Safe(reader, "PostPocketRollPath end");
+                List<FixVec2> cps   = ReadConnectionPoints(reader, "PostPocketRollPath");
+                postPocketRollPath  = new Segment(start, end, cps);
+            }
+
+            return (tableSegments, pockets, postPocketRollPath);
         }
 
         // ── Private helpers ───────────────────────────────────────────────────────
