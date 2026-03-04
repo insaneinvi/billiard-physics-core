@@ -7,10 +7,11 @@
 //   // --- Setup (once, pool-friendly) ---
 //   var helper = new PocketDropAniHelper();
 //
-//   // --- Start drop ---
+//   // --- Start drop (option A: supply a Ball to auto-fill position & initial spin) ---
 //   var req = new PocketDropRequest
 //   {
-//       startPos       = ball.transform.position,
+//       ball           = physicsBall,               // Ball.Position → startPos XY; Ball.AngularVelocity → initial spin
+//       startPos       = new Vector3(0, 0, tableZ), // Z is still taken from startPos when ball is provided
 //       pocketPos      = pocket.transform.position,
 //       duration       = 0.25f,
 //       sinkDepth      = 0.18f,
@@ -18,6 +19,15 @@
 //       sinkRatio      = 0.50f,
 //       vanishRatio    = 0.20f,
 //       attractStrength = 0.25f,
+//   };
+//
+//   // --- Start drop (option B: manual position, no Ball) ---
+//   var req = new PocketDropRequest
+//   {
+//       startPos       = ball.transform.position,
+//       pocketPos      = pocket.transform.position,
+//       duration       = 0.25f,
+//       sinkDepth      = 0.18f,
 //   };
 //   helper.StartDrop(in req);
 //
@@ -28,6 +38,7 @@
 //       ball.transform.position   = state.position;
 //       ball.transform.localScale = Vector3.one * state.scale;
 //       renderer.material.color   = new Color(r, g, b, state.alpha);
+//       // state.angularVelocity is in physics coords – feed to PhysicsToView.IntegrateRotation
 //
 //       if (state.phase == PocketDropPhase.Finished)
 //           objectPool.Return(ball);   // pool return is the caller's responsibility
@@ -63,7 +74,24 @@ namespace BilliardPhysics.AniHelp
     /// </summary>
     public struct PocketDropRequest
     {
-        /// <summary>World position of the ball at the moment it is pocketed.</summary>
+        /// <summary>
+        /// Optional physics ball.  When non-null:
+        /// <list type="bullet">
+        ///   <item><see cref="Ball.Position"/> overrides the XY components of <see cref="startPos"/>.</item>
+        ///   <item><see cref="Ball.AngularVelocity"/> seeds the initial angular velocity that is
+        ///     output via <see cref="PocketDropState.angularVelocity"/> and decays to zero during
+        ///     the Attract phase so the visual spin matches the physics state at pocketing time.</item>
+        /// </list>
+        /// When <c>null</c> (default) <see cref="startPos"/> and zero initial spin are used.
+        /// </summary>
+        public Ball ball;
+
+        /// <summary>
+        /// World position of the ball at the moment it is pocketed.
+        /// When <see cref="ball"/> is non-null the X and Y components are overridden by
+        /// <see cref="Ball.Position"/>; the Z component is always taken from this field
+        /// (use it to specify the table-surface height in world space).
+        /// </summary>
         public Vector3 startPos;
 
         /// <summary>World position of the pocket centre.</summary>
@@ -110,6 +138,17 @@ namespace BilliardPhysics.AniHelp
         /// <summary>Alpha / opacity (slight decay during Vanish).</summary>
         public float alpha;
 
+        /// <summary>
+        /// Angular velocity (rad/s) in the physics coordinate system (Z-up).
+        /// Seeded from <see cref="Ball.AngularVelocity"/> when a <see cref="Ball"/> is
+        /// supplied via <see cref="PocketDropRequest.ball"/>; decays to zero over the
+        /// Attract phase so the visual spin smoothly stops as the ball enters the pocket.
+        /// Zero during Sink, Vanish, and Finished phases.
+        /// Feed this value to <see cref="BilliardPhysics.Runtime.ViewTool.PhysicsToView.IntegrateRotation"/>
+        /// to drive the ball's visual rotation.
+        /// </summary>
+        public Vector3 angularVelocity;
+
         /// <summary>Which animation phase is currently active.</summary>
         public PocketDropPhase phase;
 
@@ -153,6 +192,7 @@ namespace BilliardPhysics.AniHelp
         private float   _duration;
         private float   _attractEnd;      // normalised time boundary: end of Attract
         private float   _sinkEnd;         // normalised time boundary: end of Sink
+        private Vector3 _startAngularVelocity; // initial spin seeded from Ball.AngularVelocity
 
         // ── Public API ────────────────────────────────────────────────────────
 
@@ -206,8 +246,22 @@ namespace BilliardPhysics.AniHelp
             float strength = req.attractStrength > 0f ? req.attractStrength : DefaultAttractStrength;
             float depth    = req.sinkDepth >= 0f ? req.sinkDepth : DefaultSinkDepth;
 
-            _startPos      = req.startPos;
-            _attractTarget = req.startPos + (req.pocketPos - req.startPos) * strength;
+            // When a Ball is supplied, override startPos XY from physics coordinates
+            // and seed the initial angular velocity from the ball's current spin.
+            if (req.ball != null)
+            {
+                var bp = req.ball.Position;
+                _startPos = new Vector3(bp.X.ToFloat(), bp.Y.ToFloat(), req.startPos.z);
+                var av = req.ball.AngularVelocity;
+                _startAngularVelocity = new Vector3(av.X.ToFloat(), av.Y.ToFloat(), av.Z.ToFloat());
+            }
+            else
+            {
+                _startPos             = req.startPos;
+                _startAngularVelocity = Vector3.zero;
+            }
+
+            _attractTarget = _startPos + (req.pocketPos - _startPos) * strength;
             _sinkStartPos  = _attractTarget;
             _sinkEndPos    = _sinkStartPos + Vector3.back * depth;
 
@@ -252,10 +306,11 @@ namespace BilliardPhysics.AniHelp
 
             if (t >= 1f)
             {
-                state.phase    = PocketDropPhase.Finished;
-                state.position = _sinkEndPos;
-                state.scale    = 0f;
-                state.alpha    = 0f;
+                state.phase           = PocketDropPhase.Finished;
+                state.position        = _sinkEndPos;
+                state.scale           = 0f;
+                state.alpha           = 0f;
+                state.angularVelocity = Vector3.zero;
                 return state;
             }
 
@@ -265,10 +320,13 @@ namespace BilliardPhysics.AniHelp
                 float phaseT  = _attractEnd > 0f ? t / _attractEnd : 1f;
                 float eased   = EaseOut(phaseT);
 
-                state.phase    = PocketDropPhase.Attract;
-                state.position = Vector3.LerpUnclamped(_startPos, _attractTarget, eased);
-                state.scale    = 1f;
-                state.alpha    = 1f;
+                state.phase           = PocketDropPhase.Attract;
+                state.position        = Vector3.LerpUnclamped(_startPos, _attractTarget, eased);
+                state.scale           = 1f;
+                state.alpha           = 1f;
+                // Angular velocity decays from the ball's initial spin to zero as
+                // the ball glides toward the pocket (spin dissipates during attraction).
+                state.angularVelocity = Vector3.Lerp(_startAngularVelocity, Vector3.zero, eased);
             }
             else if (t < _sinkEnd)
             {
@@ -277,10 +335,11 @@ namespace BilliardPhysics.AniHelp
                 float phaseT = span > 0f ? (t - _attractEnd) / span : 1f;
                 float eased  = EaseIn(phaseT);
 
-                state.phase    = PocketDropPhase.Sink;
-                state.position = Vector3.LerpUnclamped(_sinkStartPos, _sinkEndPos, eased);
-                state.scale    = 1f;
-                state.alpha    = 1f;
+                state.phase           = PocketDropPhase.Sink;
+                state.position        = Vector3.LerpUnclamped(_sinkStartPos, _sinkEndPos, eased);
+                state.scale           = 1f;
+                state.alpha           = 1f;
+                state.angularVelocity = Vector3.zero;
             }
             else
             {
@@ -289,10 +348,11 @@ namespace BilliardPhysics.AniHelp
                 float phaseT = span > 0f ? (t - _sinkEnd) / span : 1f;
                 float eased  = EaseIn(phaseT);
 
-                state.phase    = PocketDropPhase.Vanish;
-                state.position = _sinkEndPos;
-                state.scale    = 1f - eased;                  // 1 → 0  (primary: scale drives invisibility)
-                state.alpha    = 1f - eased;                  // 1 → 0  (secondary alpha fade mirrors scale)
+                state.phase           = PocketDropPhase.Vanish;
+                state.position        = _sinkEndPos;
+                state.scale           = 1f - eased;                  // 1 → 0  (primary: scale drives invisibility)
+                state.alpha           = 1f - eased;                  // 1 → 0  (secondary alpha fade mirrors scale)
+                state.angularVelocity = Vector3.zero;
             }
 
             return state;
@@ -331,6 +391,7 @@ namespace BilliardPhysics.AniHelp
             state.position       = _sinkEndPos;
             state.scale          = 0f;
             state.alpha          = 0f;
+            state.angularVelocity = Vector3.zero;
             state.normalizedTime = 1f;
             return state;
         }

@@ -35,7 +35,8 @@ Assets/BilliardPhysics/
 │   ├── AimAssist/
 │   │   └── AimAssistRenderer.cs          # 击球辅助线 MonoBehaviour（LineRenderer 渲染）
 │   ├── AniHelp/
-│   │   └── PocketDropAniHelper.cs        # 球落袋动画纯逻辑辅助（三段式：吸引→下沉→消失）
+│   │   ├── PocketDropAniHelper.cs        # 球落袋动画纯逻辑辅助（三段式：吸引→下沉→消失）
+│   │   └── PocketPostRollAniHelper.cs    # 落袋后滚动动画纯逻辑辅助（路径跟随 + 碰撞停止）
 │   └── Table/
 │       ├── TableDefinition.cs            # 台面配置（ScriptableObject，传统方式）
 │       ├── PocketDefinition.cs           # 球袋配置（ScriptableObject，传统方式）
@@ -382,16 +383,15 @@ public class BallDropController : MonoBehaviour
         Vector3 pocketWorldPos, SegmentData rollPath)
     {
         // 从 Ball 读取落袋瞬间的位置（Ball 是唯一权威数据源）。
-        // Ball.Position 是 FixVec2（定点数 2D）；Z 轴取渲染层当前值保持平面一致。
-        Vector3 startPos = new Vector3(
-            ball.Position.X.ToFloat(),
-            ball.Position.Y.ToFloat(),
-            ballTransform.position.z);
+        // 下面将 ball 直接传入 PocketDropRequest.ball，helper 会自动从 Ball.Position 提取 XY
+        // 并从 Ball.AngularVelocity 读取初始旋转速度，使 Drop 动画无缝衔接物理状态。
 
         PocketDropAniHelper helper = _pool.Rent();
         helper.StartDrop(new PocketDropRequest
         {
-            startPos        = startPos,
+            // 直接传入 Ball：Position 自动转为 startPos 的 XY，AngularVelocity 自动转为初始旋转速度。
+            ball            = ball,
+            startPos        = new Vector3(0f, 0f, ballTransform.position.z), // Z 仍手动指定
             pocketPos       = pocketWorldPos,
             duration        = 0.25f,
             sinkDepth       = 0.18f,
@@ -431,6 +431,9 @@ public class BallDropController : MonoBehaviour
             drop.BallTransform.localScale    = Vector3.one * state.scale;
             drop.BallRenderer.material.color = new Color(
                 drop.BaseColor.r, drop.BaseColor.g, drop.BaseColor.b, state.alpha);
+            // state.angularVelocity 驱动球的视觉旋转（Attract 阶段从物理角速度平滑衰减至 0）
+            drop.BallTransform.rotation = BilliardPhysics.Runtime.ViewTool.PhysicsToView
+                .IntegrateRotation(drop.BallTransform.rotation, state.angularVelocity, Time.deltaTime);
 
             if (state.phase == PocketDropPhase.Finished)
             {
@@ -580,7 +583,8 @@ public class BallDropController : MonoBehaviour
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `startPos` | — | 球落袋瞬间的世界坐标（由 `Ball.Position` 转换而来） |
+| `ball` | `null` | （可选）物理球对象。非 null 时自动从 `Ball.Position` 读取 XY 坐标覆盖 `startPos` 的 XY，并从 `Ball.AngularVelocity` 读取初始旋转速度；null 时使用 `startPos` 和零初始角速度 |
+| `startPos` | — | 球落袋瞬间的世界坐标。提供 `ball` 时 XY 被覆盖，Z 始终取此字段（用于指定台面高度） |
 | `pocketPos` | — | 球袋中心的世界坐标 |
 | `duration` | 0.25 s | 整段动画总时长（≤ 0 使用默认值） |
 | `sinkDepth` | 0.18 | Sink 阶段沿 `-Z` 下沉的距离（物理单位，< 0 使用默认值） |
@@ -596,6 +600,7 @@ public class BallDropController : MonoBehaviour
 | `position` | 当前帧建议的球世界坐标 |
 | `scale` | 均匀缩放值（Vanish 阶段 1 → 0）；应用至 `BallScaleState.Scale` 及 `Transform.localScale` |
 | `alpha` | 不透明度（Vanish 阶段 1 → 0） |
+| `angularVelocity` | 物理坐标系（Z-up）中的角速度（rad/s）。由 `Ball.AngularVelocity` 初始化，在 Attract 阶段平滑衰减至 0；Sink / Vanish / Finished 阶段始终为零。传入 `PhysicsToView.IntegrateRotation` 可驱动球的视觉旋转 |
 | `phase` | 当前阶段（`Attract` / `Sink` / `Vanish` / `Finished`） |
 | `normalizedTime` | 动画整体进度 0..1 |
 
@@ -610,6 +615,64 @@ public class BallDropController : MonoBehaviour
 | `Reset()` | 重置为初始空闲状态，适用于归还对象池前调用 |
 | `IsRunning` | 动画是否正在播放 |
 | `IsFinished` | 动画是否已完成 |
+
+### 8. 落袋后滚动动画（PocketPostRollAniHelper）
+
+`PocketPostRollAniHelper` 在 `PocketDropAniHelper` 结束后接管，驱动球沿预设折线路径（`PostPocketRollPath`）滚动至终点或被已停止的球阻挡。
+
+**PocketPostRollRequest 参数一览：**
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `ball` | `null` | （可选）物理球对象。非 null 时自动从 `Ball.Radius` 读取滚动球半径，覆盖 `ballRadius` 字段 |
+| `pathPoints` | — | 世界空间路径点数组（`[起点, CP0, CP1, …, 终点]`），至少两点；少于两点则立即完成 |
+| `duration` | 1.0 s | 沿完整路径的动画总时长；路径被截断时按比例缩短，保持匀速 |
+| `ballRadius` | 0 | 滚动球半径（世界单位）；提供 `ball` 时忽略此字段 |
+| `isCueBall` | `false` | 是否为母球；停止时触发 `OnCueBallRetrieved` 回调 |
+| `stoppedBalls` | `null` | 已停止在路径上的球列表（用于提前碰撞停止检测），可为 null |
+
+**PocketPostRollState 字段一览：**
+
+| 字段 | 说明 |
+|------|------|
+| `position` | 当前帧建议的球世界坐标 |
+| `angularVelocity` | 物理坐标系（Z-up）中的角速度（rad/s），按无滑滚动条件由路径方向和速度计算；停止时为零。传入 `PhysicsToView.IntegrateRotation` 可驱动视觉旋转 |
+| `phase` | 当前阶段（`Rolling` / `Finished`） |
+| `normalizedTime` | 动画整体进度 0..1 |
+
+**公共 API：**
+
+| 方法 / 属性 | 说明 |
+|------------|------|
+| `Start(in PocketPostRollRequest)` | 启动（或重置后重新启动）动画 |
+| `Update(float deltaTime)` | 按帧推进动画，返回当前 `PocketPostRollState`（无堆分配）；到达终点或被阻停时触发 `OnStop` |
+| `Evaluate(float normalizedTime)` | 在任意归一化时间采样状态，不修改内部状态 |
+| `Stop()` | 立即停止动画（不标记为 Finished，不触发回调） |
+| `Reset()` | 重置为初始空闲状态，适用于归还对象池前调用 |
+| `OnStop` | `Action<Vector3>`，球停止时触发，参数为最终世界坐标 |
+| `OnCueBallRetrieved` | `Action`，仅当 `isCueBall == true` 时在 `OnStop` 之后触发 |
+| `IsRunning` | 动画是否正在播放 |
+| `IsFinished` | 动画是否已完成 |
+
+**使用示例（与 PocketDropAniHelper 衔接）：**
+
+```csharp
+// PocketDropAniHelper 完成后，在 Finished 分支中启动 PostRoll：
+if (state.phase == PocketDropPhase.Finished)
+{
+    var rollHelper = new PocketPostRollAniHelper();
+    rollHelper.OnStop = finalPos => Debug.Log($"Ball stopped at {finalPos}");
+
+    rollHelper.Start(new PocketPostRollRequest
+    {
+        ball         = drop.BallData,      // Ball.Radius 自动读取，无需手填 ballRadius
+        pathPoints   = waypoints,          // [起点, CP…, 终点]
+        duration     = 1.0f,
+        isCueBall    = drop.BallData.Id == 0,
+        stoppedBalls = _stoppedBalls,
+    });
+}
+```
 
 ## 物理参数说明
 

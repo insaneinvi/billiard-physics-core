@@ -1,5 +1,6 @@
 using NUnit.Framework;
 using UnityEngine;
+using BilliardPhysics;
 using BilliardPhysics.AniHelp;
 
 namespace BilliardPhysics.Tests
@@ -458,6 +459,67 @@ namespace BilliardPhysics.Tests
             Assert.IsTrue(h.IsRunning);
             PocketPostRollState mid = h.Evaluate(0.5f);
             Assert.AreEqual(3.5f, mid.position.y, Eps);
+        }
+
+        // ── Ball parameter ────────────────────────────────────────────────────
+
+        [Test]
+        public void BallProvided_BallRadius_UsedFromBallRadius()
+        {
+            // Ball.Radius = 0.28575; stopped ball r=0.5 at x=5.
+            // Contact dist = 0.28575 + 0.5 ≈ 0.78575; contact at x ≈ 5 - 0.28575 ≈ 4.714.
+            var ball = new Ball(1); // Ball(int id) uses StandardRadius ≈ 0.28575
+
+            var stopped = new[]
+            {
+                new StoppedBallInfo { ballId = 99, position = new Vector3(5f, 0f, 0f), radius = 0.5f },
+            };
+
+            var h = MakeHelper();
+            h.Start(new PocketPostRollRequest
+            {
+                ball         = ball,
+                pathPoints   = new[] { Vector3.zero, new Vector3(10f, 0f, 0f) },
+                duration     = 1f,
+                stoppedBalls = stopped,
+            });
+
+            PocketPostRollState state = h.Update(10f); // animate to completion
+
+            Assert.AreEqual(PocketPostRollPhase.Finished, state.phase);
+            float expectedContact = 5f - ball.Radius.ToFloat(); // ≈ 4.714
+            Assert.AreEqual(expectedContact, state.position.x, 1e-2f,
+                "Ball should stop at contact point derived from Ball.Radius");
+        }
+
+        [Test]
+        public void BallProvided_ExplicitBallRadius_Ignored()
+        {
+            // When ball is supplied, ballRadius field should be ignored.
+            // Use ball.Radius (≈0.28575) vs explicit ballRadius=9999 – the
+            // explicit value must NOT be used.
+            var ball = new Ball(2);
+
+            var stopped = new[]
+            {
+                new StoppedBallInfo { ballId = 99, position = new Vector3(5f, 0f, 0f), radius = 0.5f },
+            };
+
+            var h = MakeHelper();
+            h.Start(new PocketPostRollRequest
+            {
+                ball         = ball,
+                ballRadius   = 9999f,       // should be ignored
+                pathPoints   = new[] { Vector3.zero, new Vector3(10f, 0f, 0f) },
+                duration     = 1f,
+                stoppedBalls = stopped,
+            });
+
+            PocketPostRollState state = h.Update(10f);
+
+            Assert.AreEqual(PocketPostRollPhase.Finished, state.phase);
+            // Contact point ≈ 5 - 0.28575 ≈ 4.714, NOT at 5 - 9999 (which would be negative)
+            Assert.Greater(state.position.x, 0f, "ball.Radius must have been used, not 9999");
         }
     }
 }

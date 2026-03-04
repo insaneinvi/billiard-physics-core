@@ -20,6 +20,16 @@
 //   helper.OnCueBallRetrieved = ()      => RespotCueBall();
 //
 //   // --- Start (called after PocketDropAniHelper finishes) ---
+//   // Option A: supply a Ball to auto-derive ballRadius from Ball.Radius
+//   var req = new PocketPostRollRequest
+//   {
+//       ball         = physicsBall,           // Ball.Radius → ballRadius (auto-derived)
+//       pathPoints   = pathPoints,
+//       duration     = 1.0f,
+//       isCueBall    = false,
+//       stoppedBalls = alreadyStoppedBalls,
+//   };
+//   // Option B: specify ballRadius manually (no Ball)
 //   var req = new PocketPostRollRequest
 //   {
 //       pathPoints   = pathPoints,
@@ -87,6 +97,14 @@ namespace BilliardPhysics.AniHelp
     public struct PocketPostRollRequest
     {
         /// <summary>
+        /// Optional physics ball.  When non-null, <see cref="Ball.Radius"/> overrides
+        /// <see cref="ballRadius"/> so the caller does not need to duplicate the value.
+        /// The ball radius is used together with each <see cref="StoppedBallInfo.radius"/>
+        /// to determine contact distance (r_rolling + r_stopped).
+        /// </summary>
+        public Ball ball;
+
+        /// <summary>
         /// World-space waypoints of the roll path in order:
         /// [start, CP0, CP1, …, end].  The first element should match the
         /// drop animation's final position (<see cref="PocketDropState.position"/>)
@@ -106,6 +124,8 @@ namespace BilliardPhysics.AniHelp
 
         /// <summary>
         /// Radius of the rolling ball in world units.
+        /// Ignored when <see cref="ball"/> is non-null (radius is taken from
+        /// <see cref="Ball.Radius"/> automatically).
         /// Used together with each <see cref="StoppedBallInfo.radius"/> to
         /// determine contact distance (r_rolling + r_stopped).
         /// </summary>
@@ -224,7 +244,8 @@ namespace BilliardPhysics.AniHelp
         {
             _isCueBall  = req.isCueBall;
             _duration   = req.duration > 0f ? req.duration : DefaultDuration;
-            _ballRadius = req.ballRadius;
+            // When a Ball is supplied, derive ballRadius from its physics value.
+            _ballRadius = req.ball != null ? req.ball.Radius.ToFloat() : req.ballRadius;
 
             // ── Build waypoints ───────────────────────────────────────────────
             _waypoints = (req.pathPoints != null && req.pathPoints.Length >= 2)
@@ -262,7 +283,7 @@ namespace BilliardPhysics.AniHelp
             {
                 foreach (var sb in req.stoppedBalls)
                 {
-                    float contactDist = req.ballRadius + sb.radius;
+                    float contactDist = _ballRadius + sb.radius;
                     float arcLen      = FindContactArcLength(_waypoints, contactDist, sb.position);
                     if (arcLen < blockArcLen)
                         blockArcLen = arcLen;
