@@ -20,7 +20,7 @@ namespace BilliardPhysics.Editor
         private static readonly Color s_rollPathColor     = new Color(1f, 0.5f, 0f, 0.9f);
 
         // ── Selection ─────────────────────────────────────────────────────
-        private enum SelectionKind { None, TableSegment, PocketRimSegment, PocketRollPath }
+        private enum SelectionKind { None, TableSegment, PocketRimSegment, TableRollPath }
         private SelectionKind _selKind    = SelectionKind.None;
         private int           _selPrimary = -1; // table segment idx or pocket idx
         private int           _selRim     = -1; // rim segment idx inside pocket
@@ -48,13 +48,15 @@ namespace BilliardPhysics.Editor
 
         // ── Cached serialized properties (set once in OnEnable) ───────────
         private SerializedProperty _tableSegsProp;
+        private SerializedProperty _tableRollPathProp;
         private SerializedProperty _pocketsProp;
 
         private void OnEnable()
         {
             SerializedProperty tableProp = serializedObject.FindProperty("Table");
-            _tableSegsProp = tableProp?.FindPropertyRelative("Segments");
-            _pocketsProp   = serializedObject.FindProperty("Pockets");
+            _tableSegsProp     = tableProp?.FindPropertyRelative("Segments");
+            _tableRollPathProp = tableProp?.FindPropertyRelative("PostPocketRollPath");
+            _pocketsProp       = serializedObject.FindProperty("Pockets");
             SyncSegmentLengths();
             SyncRimGenArrays();
         }
@@ -334,9 +336,10 @@ namespace BilliardPhysics.Editor
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Post-Pocket Roll Path", EditorStyles.boldLabel);
             EditorGUILayout.HelpBox(
-                "每个球袋的 PostPocketRollPath（SegmentData）定义了球落袋动画完成后的滚动路径：\n" +
+                "Table 的 PostPocketRollPath（SegmentData）定义了球落袋动画完成后的滚动路径：\n" +
                 "Start → CP[0] → CP[1] → … → End\n" +
                 "Start == End 且无 ConnectionPoints 时不触发滚动。\n" +
+                "所有落袋（无论哪个球袋）都共用该路径。\n" +
                 "运行时由 BallDropController 在动画完成后读取，驱动球沿路径移动。\n" +
                 "路径在场景视图中以橙色显示。",
                 MessageType.Info);
@@ -375,6 +378,7 @@ namespace BilliardPhysics.Editor
             if (table?.Segments == null) return;
             foreach (var seg in table.Segments)
                 TransformSegmentData(seg);
+            TransformSegmentData(table.PostPocketRollPath);
         }
 
         private static void TransformPocketConfig(PocketConfig pocket)
@@ -382,7 +386,6 @@ namespace BilliardPhysics.Editor
             if (pocket == null) return;
             pocket.Center = RotateLeft90TranslateX(pocket.Center);
             TransformSegmentData(pocket.RimSegments);
-            TransformSegmentData(pocket.PostPocketRollPath);
         }
 
         // ── Scale Helpers ─────────────────────────────────────────────────
@@ -401,6 +404,7 @@ namespace BilliardPhysics.Editor
             if (table?.Segments == null) return;
             foreach (var seg in table.Segments)
                 ScaleSegmentData(seg, factor);
+            ScaleSegmentData(table.PostPocketRollPath, factor);
         }
 
         private static void ScalePocketConfig(PocketConfig pocket, float factor)
@@ -409,7 +413,6 @@ namespace BilliardPhysics.Editor
             pocket.Center = pocket.Center * factor;
             pocket.Radius = pocket.Radius * factor;
             ScaleSegmentData(pocket.RimSegments, factor);
-            ScaleSegmentData(pocket.PostPocketRollPath, factor);
         }
 
         // ── Fixed-Point Binary Export ──────────────────────────────────────
@@ -918,130 +921,129 @@ namespace BilliardPhysics.Editor
                 }
             }
 
-            // ── Draw post-pocket roll paths (orange, interactive) ─────────
-            for (int i = 0; i < _pocketsProp.arraySize; i++)
+            // ── Draw Table post-pocket roll path (orange, interactive) ────
+            if (_tableRollPathProp != null)
             {
-                SerializedProperty pocket  = _pocketsProp.GetArrayElementAtIndex(i);
-                SerializedProperty rollProp = pocket.FindPropertyRelative("PostPocketRollPath");
-                if (rollProp == null) continue;
-
+                SerializedProperty rollProp = _tableRollPathProp;
                 SerializedProperty rpStart = rollProp.FindPropertyRelative("Start");
                 SerializedProperty rpEnd   = rollProp.FindPropertyRelative("End");
                 SerializedProperty rpCps   = rollProp.FindPropertyRelative("ConnectionPoints");
-                if (rpStart == null || rpEnd == null) continue;
-
-                Vector2 rsv = rpStart.vector2Value;
-                Vector2 rev = rpEnd.vector2Value;
-                Vector3 rs  = new Vector3(rsv.x, rsv.y, 0f);
-                Vector3 re  = new Vector3(rev.x, rev.y, 0f);
-
-                bool hasCPs = rpCps != null && rpCps.arraySize > 0;
-
-                // Only draw if the path has meaningful length.
-                if (!hasCPs && rs == re) continue;
-
-                bool rollSel = (_selKind == SelectionKind.PocketRollPath && _selPrimary == i);
-
-                // Polyline: Start → CP[0] → … → End
-                Handles.color = rollSel ? s_pocketRimSelColor : s_rollPathColor;
-                DrawPolylineHandles(rs, re, rpCps);
-
-                // Arrow at the end point to indicate direction (use last sub-segment)
-                Vector3 arrowFrom = hasCPs
-                    ? new Vector3(
-                        rpCps.GetArrayElementAtIndex(rpCps.arraySize - 1).vector2Value.x,
-                        rpCps.GetArrayElementAtIndex(rpCps.arraySize - 1).vector2Value.y, 0f)
-                    : rs;
-                Vector3 toEnd = (re - arrowFrom).normalized;
-                if (toEnd.sqrMagnitude > 0.0001f)
+                if (rpStart != null && rpEnd != null)
                 {
-                    Handles.color = rollSel ? s_pocketRimSelColor : s_rollPathColor;
-                    Handles.ArrowHandleCap(0, re,
-                        Quaternion.LookRotation(toEnd), 0.08f, EventType.Repaint);
-                }
+                    Vector2 rsv = rpStart.vector2Value;
+                    Vector2 rev = rpEnd.vector2Value;
+                    Vector3 rs  = new Vector3(rsv.x, rsv.y, 0f);
+                    Vector3 re  = new Vector3(rev.x, rev.y, 0f);
 
-                // Clickable midpoint selects the whole roll path (clears point sub-selection).
-                Vector3 rollMid  = (rs + re) * 0.5f;
-                float   rollDot  = HandleUtility.GetHandleSize(rollMid) * 0.08f;
-                Handles.color = rollSel ? s_pocketRimSelColor : s_rollPathColor;
-                if (Handles.Button(rollMid, Quaternion.identity, rollDot, rollDot,
-                                   Handles.DotHandleCap))
-                {
-                    _selKind      = SelectionKind.PocketRollPath;
-                    _selPrimary   = i;
-                    _selRim       = -1;
-                    _selPointKind = SelectionPoint.None;
-                }
+                    bool hasCPs = rpCps != null && rpCps.arraySize > 0;
 
-                // Start/End clickable dots + position handles
-                Handles.color = s_handleColor;
-
-                float dotSizeS = HandleUtility.GetHandleSize(rs) * 0.06f;
-                if (Handles.Button(rs, Quaternion.identity, dotSizeS, dotSizeS,
-                                   Handles.DotHandleCap))
-                {
-                    _selKind      = SelectionKind.PocketRollPath;
-                    _selPrimary   = i;
-                    _selRim       = -1;
-                    _selPointKind = SelectionPoint.SegStart;
-                }
-
-                EditorGUI.BeginChangeCheck();
-                Vector3 newRs = Handles.PositionHandle(rs, Quaternion.identity);
-                if (EditorGUI.EndChangeCheck())
-                {
-                    Undo.RecordObject(target, "Move Roll Path Start");
-                    rpStart.vector2Value = new Vector2(newRs.x, newRs.y);
-                    _selKind      = SelectionKind.PocketRollPath;
-                    _selPrimary   = i;
-                    _selRim       = -1;
-                    _selPointKind = SelectionPoint.SegStart;
-                    changed       = true;
-                }
-
-                float dotSizeE = HandleUtility.GetHandleSize(re) * 0.06f;
-                if (Handles.Button(re, Quaternion.identity, dotSizeE, dotSizeE,
-                                   Handles.DotHandleCap))
-                {
-                    _selKind      = SelectionKind.PocketRollPath;
-                    _selPrimary   = i;
-                    _selRim       = -1;
-                    _selPointKind = SelectionPoint.SegEnd;
-                }
-
-                EditorGUI.BeginChangeCheck();
-                Vector3 newRe = Handles.PositionHandle(re, Quaternion.identity);
-                if (EditorGUI.EndChangeCheck())
-                {
-                    Undo.RecordObject(target, "Move Roll Path End");
-                    rpEnd.vector2Value = new Vector2(newRe.x, newRe.y);
-                    _selKind      = SelectionKind.PocketRollPath;
-                    _selPrimary   = i;
-                    _selRim       = -1;
-                    _selPointKind = SelectionPoint.SegEnd;
-                    changed       = true;
-                }
-
-                // Connection point position handles
-                if (rpCps != null)
-                {
-                    Handles.color = s_handleColor;
-                    for (int k = 0; k < rpCps.arraySize; k++)
+                    // Only draw if the path has meaningful length.
+                    if (hasCPs || rs != re)
                     {
-                        SerializedProperty cp  = rpCps.GetArrayElementAtIndex(k);
-                        Vector2            cpv = cp.vector2Value;
-                        Vector3            cp3 = new Vector3(cpv.x, cpv.y, 0f);
-                        EditorGUI.BeginChangeCheck();
-                        Vector3 newCp = Handles.PositionHandle(cp3, Quaternion.identity);
-                        if (EditorGUI.EndChangeCheck())
+                        bool rollSel = (_selKind == SelectionKind.TableRollPath);
+
+                        // Polyline: Start → CP[0] → … → End
+                        Handles.color = rollSel ? s_pocketRimSelColor : s_rollPathColor;
+                        DrawPolylineHandles(rs, re, rpCps);
+
+                        // Arrow at the end point to indicate direction (use last sub-segment)
+                        Vector3 arrowFrom = hasCPs
+                            ? new Vector3(
+                                rpCps.GetArrayElementAtIndex(rpCps.arraySize - 1).vector2Value.x,
+                                rpCps.GetArrayElementAtIndex(rpCps.arraySize - 1).vector2Value.y, 0f)
+                            : rs;
+                        Vector3 toEnd = (re - arrowFrom).normalized;
+                        if (toEnd.sqrMagnitude > 0.0001f)
                         {
-                            Undo.RecordObject(target, "Move Roll Path Connection Point");
-                            cp.vector2Value = new Vector2(newCp.x, newCp.y);
-                            _selKind      = SelectionKind.PocketRollPath;
-                            _selPrimary   = i;
+                            Handles.color = rollSel ? s_pocketRimSelColor : s_rollPathColor;
+                            Handles.ArrowHandleCap(0, re,
+                                Quaternion.LookRotation(toEnd), 0.08f, EventType.Repaint);
+                        }
+
+                        // Clickable midpoint selects the whole roll path (clears point sub-selection).
+                        Vector3 rollMid  = (rs + re) * 0.5f;
+                        float   rollDot  = HandleUtility.GetHandleSize(rollMid) * 0.08f;
+                        Handles.color = rollSel ? s_pocketRimSelColor : s_rollPathColor;
+                        if (Handles.Button(rollMid, Quaternion.identity, rollDot, rollDot,
+                                           Handles.DotHandleCap))
+                        {
+                            _selKind      = SelectionKind.TableRollPath;
+                            _selPrimary   = -1;
                             _selRim       = -1;
                             _selPointKind = SelectionPoint.None;
+                        }
+
+                        // Start/End clickable dots + position handles
+                        Handles.color = s_handleColor;
+
+                        float dotSizeS = HandleUtility.GetHandleSize(rs) * 0.06f;
+                        if (Handles.Button(rs, Quaternion.identity, dotSizeS, dotSizeS,
+                                           Handles.DotHandleCap))
+                        {
+                            _selKind      = SelectionKind.TableRollPath;
+                            _selPrimary   = -1;
+                            _selRim       = -1;
+                            _selPointKind = SelectionPoint.SegStart;
+                        }
+
+                        EditorGUI.BeginChangeCheck();
+                        Vector3 newRs = Handles.PositionHandle(rs, Quaternion.identity);
+                        if (EditorGUI.EndChangeCheck())
+                        {
+                            Undo.RecordObject(target, "Move Roll Path Start");
+                            rpStart.vector2Value = new Vector2(newRs.x, newRs.y);
+                            _selKind      = SelectionKind.TableRollPath;
+                            _selPrimary   = -1;
+                            _selRim       = -1;
+                            _selPointKind = SelectionPoint.SegStart;
                             changed       = true;
+                        }
+
+                        float dotSizeE = HandleUtility.GetHandleSize(re) * 0.06f;
+                        if (Handles.Button(re, Quaternion.identity, dotSizeE, dotSizeE,
+                                           Handles.DotHandleCap))
+                        {
+                            _selKind      = SelectionKind.TableRollPath;
+                            _selPrimary   = -1;
+                            _selRim       = -1;
+                            _selPointKind = SelectionPoint.SegEnd;
+                        }
+
+                        EditorGUI.BeginChangeCheck();
+                        Vector3 newRe = Handles.PositionHandle(re, Quaternion.identity);
+                        if (EditorGUI.EndChangeCheck())
+                        {
+                            Undo.RecordObject(target, "Move Roll Path End");
+                            rpEnd.vector2Value = new Vector2(newRe.x, newRe.y);
+                            _selKind      = SelectionKind.TableRollPath;
+                            _selPrimary   = -1;
+                            _selRim       = -1;
+                            _selPointKind = SelectionPoint.SegEnd;
+                            changed       = true;
+                        }
+
+                        // Connection point position handles
+                        if (rpCps != null)
+                        {
+                            Handles.color = s_handleColor;
+                            for (int k = 0; k < rpCps.arraySize; k++)
+                            {
+                                SerializedProperty cp  = rpCps.GetArrayElementAtIndex(k);
+                                Vector2            cpv = cp.vector2Value;
+                                Vector3            cp3 = new Vector3(cpv.x, cpv.y, 0f);
+                                EditorGUI.BeginChangeCheck();
+                                Vector3 newCp = Handles.PositionHandle(cp3, Quaternion.identity);
+                                if (EditorGUI.EndChangeCheck())
+                                {
+                                    Undo.RecordObject(target, "Move Roll Path Connection Point");
+                                    cp.vector2Value = new Vector2(newCp.x, newCp.y);
+                                    _selKind      = SelectionKind.TableRollPath;
+                                    _selPrimary   = -1;
+                                    _selRim       = -1;
+                                    _selPointKind = SelectionPoint.None;
+                                    changed       = true;
+                                }
+                            }
                         }
                     }
                 }
@@ -1189,12 +1191,10 @@ namespace BilliardPhysics.Editor
                 return true;
             }
 
-            if (_selKind == SelectionKind.PocketRollPath &&
-                _selPrimary >= 0 && _pocketsProp != null &&
-                _selPrimary < _pocketsProp.arraySize)
+            if (_selKind == SelectionKind.TableRollPath)
             {
                 var auth     = (TableAndPocketAuthoring)target;
-                var rollPath = auth.Pockets[_selPrimary].PostPocketRollPath;
+                var rollPath = auth.Table.PostPocketRollPath;
 
                 if (_selPointKind == SelectionPoint.SegEnd)
                 {
@@ -1208,8 +1208,8 @@ namespace BilliardPhysics.Editor
                     else
                     {
                         Debug.LogWarning(
-                            "[BilliardPhysics] Cannot remove Roll Path End of Pocket " + _selPrimary +
-                            ": ConnectionPoints is empty. Add intermediate points before removing End.");
+                            "[BilliardPhysics] Cannot remove Roll Path End: " +
+                            "ConnectionPoints is empty. Add intermediate points before removing End.");
                     }
                     return ok;
                 }
@@ -1226,8 +1226,8 @@ namespace BilliardPhysics.Editor
                     else
                     {
                         Debug.LogWarning(
-                            "[BilliardPhysics] Cannot remove Roll Path Start of Pocket " + _selPrimary +
-                            ": ConnectionPoints is empty. Add intermediate points before removing Start.");
+                            "[BilliardPhysics] Cannot remove Roll Path Start: " +
+                            "ConnectionPoints is empty. Add intermediate points before removing Start.");
                     }
                     return ok;
                 }

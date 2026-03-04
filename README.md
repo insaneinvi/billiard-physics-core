@@ -255,7 +255,7 @@ public class AimController : MonoBehaviour
 
 **落袋后滚动路径（PostPocketRollPath）**
 
-每个 `PocketConfig` 上都有一个可选字段 `PostPocketRollPath`（类型为 `SegmentData`），在 `TableAndPocketAuthoring` Inspector 中配置：
+`TableConfig` 上有一个可选字段 `PostPocketRollPath`（类型为 `SegmentData`），在 `TableAndPocketAuthoring` Inspector 中配置，所有球袋共用该路径：
 
 - **Start** → **ConnectionPoints**（0..N 个中间路径点）→ **End** 构成完整滚动轨迹。
 - 当 `Start == End` 且 `ConnectionPoints` 为空时，视为"未配置"，跳过滚动阶段。
@@ -311,7 +311,7 @@ internal sealed class ActiveDrop
     public Color           BaseColor;      // 落袋瞬间的基础颜色
     public BallScaleState  ScaleState;     // 组合式缩放（动画结束后丢弃）
     public PocketDropAniHelper Helper;     // 动画驱动（来自池）
-    public SegmentData     RollPath;       // 落袋后滚动路径（来自 PocketConfig.PostPocketRollPath）
+    public SegmentData     RollPath;       // 落袋后滚动路径（来自 TableConfig.PostPocketRollPath）
 }
 
 // ── 落袋后滚动状态容器 ───────────────────────────────────────────────────────
@@ -352,7 +352,7 @@ public class BallDropController : MonoBehaviour
     /// <param name="ballRenderer">落袋球的 Renderer，用于驱动材质 alpha。</param>
     /// <param name="pocketWorldPos">球袋中心的世界坐标。</param>
     /// <param name="rollPath">
-    /// 落袋后滚动路径（来自 <c>PocketConfig.PostPocketRollPath</c>）。
+    /// 落袋后滚动路径（来自 <c>TableConfig.PostPocketRollPath</c>）。
     /// Start == End 且无 ConnectionPoints 时跳过滚动。
     /// </param>
     public void OnBallPocketed(
