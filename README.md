@@ -35,7 +35,8 @@ Assets/BilliardPhysics/
 │   ├── AimAssist/
 │   │   └── AimAssistRenderer.cs          # 击球辅助线 MonoBehaviour（LineRenderer 渲染）
 │   ├── AniHelp/
-│   │   └── PocketDropAniHelper.cs        # 球落袋动画纯逻辑辅助（三段式：吸引→下沉→消失）
+│   │   ├── PocketDropAniHelper.cs        # 球落袋动画纯逻辑辅助（三段式：吸引→下沉→消失）
+│   │   └── PocketPostRollAniHelper.cs    # 落袋后滚动动画纯逻辑辅助（含物理角速度、Z轴钳位）
 │   └── Table/
 │       ├── TableDefinition.cs            # 台面配置（ScriptableObject，传统方式）
 │       ├── PocketDefinition.cs           # 球袋配置（ScriptableObject，传统方式）
@@ -264,7 +265,7 @@ public class AimController : MonoBehaviour
 **多球并发与碰撞停止规则**
 
 - 落袋动画（`_activeDrops`）和落袋后滚动（`_activeRolls`）各有独立的活跃列表，可同时驱动任意数量的球。
-- 滚动过程中，若当前球与**任何已停止的球**（之前落袋后滚到终点或被阻停的球，记录在 `_stoppedBalls`）发生接触（中心距 ≤ 两球半径之和），当前球立即停在接触位置，不再继续向 End 移动。
+- 滚动阶段由 `PocketPostRollAniHelper` 驱动：每颗球持有独立的 helper 实例，碰撞检测与早停逻辑均由 helper 内部完成（通过 `PocketPostRollRequest.stoppedBalls` 传入已停球信息）。
 - 新一局开始前调用 `ClearPocketedBalls()` 清空停止记录。
 
 **使用示例：**
@@ -314,22 +315,19 @@ internal sealed class ActiveDrop
     public SegmentData     RollPath;       // 落袋后滚动路径（来自 TableConfig.PostPocketRollPath）
 }
 
-// ── 落袋后滚动状态容器 ───────────────────────────────────────────────────────
+// ── 落袋后滚动状态容器（使用 PocketPostRollAniHelper 驱动）────────────────────
 internal sealed class ActiveRoll
 {
-    public Ball       BallData;       // 物理权威（用于读取 Radius）
-    public Transform  BallTransform;  // 渲染层 Transform
-    public Vector3[]  Waypoints;      // 路径点：[Start, CP0, CP1, …, End]
-    public int        SegIdx;         // 当前所在子段索引
-    public float      SegT;           // 子段内插值进度 [0, 1]
-    public float      Speed;          // 滚动速度（世界单位 / 秒）
+    public Transform               BallTransform;  // 渲染层 Transform
+    public PocketPostRollAniHelper Helper;          // 滚动动画驱动（处理 Z 轴钳位与物理角速度）
+    public float                   BallRadius;      // 球半径（供停止记录）
 }
 
 // ── 控制器 ────────────────────────────────────────────────────────────────────
 public class BallDropController : MonoBehaviour
 {
-    [Tooltip("落袋后球沿路径滚动的速度（世界单位 / 秒）")]
-    public float RollSpeed = 0.5f;
+    [Tooltip("落袋后整段滚动动画的总时长（秒）")]
+    public float RollDuration = 1.5f;
 
     // 对象池：在同一个 Controller 实例内复用 helper
     private readonly PocketDropAniHelperPool _pool        = new PocketDropAniHelperPool();
@@ -337,9 +335,8 @@ public class BallDropController : MonoBehaviour
     private readonly List<ActiveDrop>        _activeDrops = new List<ActiveDrop>();
     // 活跃滚动列表：落袋动画完成后进入此列表
     private readonly List<ActiveRoll>        _activeRolls = new List<ActiveRoll>();
-    // 已停止在路径上的球（位置 + 半径），供后续球碰撞检测使用
-    private readonly List<(Vector3 pos, float radius)> _stoppedBalls =
-        new List<(Vector3 pos, float radius)>();
+    // 已停止在路径上的球，供后续球的 PocketPostRollRequest.stoppedBalls 使用
+    private readonly List<StoppedBallInfo>   _stoppedBalls = new List<StoppedBallInfo>();
 
     // ── 公共 API ──────────────────────────────────────────────────────────────
 
@@ -462,15 +459,27 @@ public class BallDropController : MonoBehaviour
         // 2. 驱动落袋后滚动
         for (int i = _activeRolls.Count - 1; i >= 0; i--)
         {
-            ActiveRoll roll    = _activeRolls[i];
-            bool       stopped = AdvanceRoll(roll, Time.deltaTime);
+            ActiveRoll             roll  = _activeRolls[i];
+            PocketPostRollState    state = roll.Helper.Update(Time.deltaTime);
 
-            if (stopped)
+            // 应用位置（Z 轴已由 PocketPostRollAniHelper 钳位至起点 Z，不会漂移）
+            roll.BallTransform.position = state.position;
+
+            // 应用物理角速度（无滑动滚动条件：ω = Cross(forward, v) / r）
+            if (state.angularVelocity != Vector3.zero)
+                roll.BallTransform.Rotate(
+                    state.angularVelocity * Time.deltaTime * Mathf.Rad2Deg,
+                    Space.World);
+
+            if (state.phase == PocketPostRollPhase.Finished)
             {
-                // 记录停止位置，供后续球碰撞检测使用
-                _stoppedBalls.Add((
-                    roll.BallTransform.position,
-                    roll.BallData.Radius.ToFloat()));
+                // 记录停止位置，供后续球的 PocketPostRollRequest.stoppedBalls 使用
+                _stoppedBalls.Add(new StoppedBallInfo
+                {
+                    ballId   = i,
+                    position = state.position,
+                    radius   = roll.BallRadius,
+                });
 
                 // 隐藏；也可归还球对象池
                 roll.BallTransform.gameObject.SetActive(false);
@@ -483,9 +492,9 @@ public class BallDropController : MonoBehaviour
     private void StartRoll(Ball ball, Transform ballTransform, SegmentData path)
     {
         int cpCount = path.ConnectionPoints?.Count ?? 0;
-        // Waypoints: [Start, CP0, CP1, …, End]
-        var waypoints = new Vector3[cpCount + 2];
+        // Waypoints: [Start, CP0, CP1, …, End]（Z 统一取当前渲染层 Z）
         float z = ballTransform.position.z;
+        var waypoints = new Vector3[cpCount + 2];
         waypoints[0] = new Vector3(path.Start.x, path.Start.y, z);
         for (int k = 0; k < cpCount; k++)
             waypoints[k + 1] = new Vector3(
@@ -495,71 +504,23 @@ public class BallDropController : MonoBehaviour
         // 将球放置在路径起点
         ballTransform.position = waypoints[0];
 
+        float radius = ball.Radius.ToFloat();
+        var rollHelper = new PocketPostRollAniHelper();
+        rollHelper.Start(new PocketPostRollRequest
+        {
+            pathPoints   = waypoints,
+            duration     = RollDuration,
+            ballRadius   = radius,
+            isCueBall    = false,
+            stoppedBalls = _stoppedBalls.ToArray(),
+        });
+
         _activeRolls.Add(new ActiveRoll
         {
-            BallData      = ball,
             BallTransform = ballTransform,
-            Waypoints     = waypoints,
-            SegIdx        = 0,
-            SegT          = 0f,
-            Speed         = RollSpeed,
+            Helper        = rollHelper,
+            BallRadius    = radius,
         });
-    }
-
-    // ── 推进滚动；返回 true 表示停止（到达终点或撞上已停球）────────────────────
-    private bool AdvanceRoll(ActiveRoll roll, float deltaTime)
-    {
-        float selfRadius = roll.BallData.Radius.ToFloat();
-
-        while (deltaTime > 0f && roll.SegIdx < roll.Waypoints.Length - 1)
-        {
-            Vector3 from   = roll.Waypoints[roll.SegIdx];
-            Vector3 to     = roll.Waypoints[roll.SegIdx + 1];
-            float   segLen = Vector3.Distance(from, to);
-
-            if (segLen < 0.0001f)   // 退化子段，跳过
-            {
-                roll.SegIdx++;
-                continue;
-            }
-
-            float remaining = (1f - roll.SegT) * segLen;
-            float step      = roll.Speed * deltaTime;
-            Vector3 newPos;
-
-            if (step >= remaining)
-            {
-                newPos      = to;
-                roll.SegT   = 0f;
-                roll.SegIdx++;
-                deltaTime  -= remaining / roll.Speed;
-            }
-            else
-            {
-                roll.SegT += step / segLen;
-                deltaTime  = 0f;
-                newPos     = Vector3.Lerp(from, to, roll.SegT);
-            }
-
-            // 碰到已停止的球则立即停在接触位置
-            foreach (var (stoppedPos, stoppedRadius) in _stoppedBalls)
-            {
-                float contactDist = selfRadius + stoppedRadius;
-                if (Vector3.Distance(newPos, stoppedPos) <= contactDist)
-                {
-                    Vector3 dir = newPos - stoppedPos;
-                    if (dir.sqrMagnitude < 0.00001f) dir = Vector3.right;
-                    roll.BallTransform.position =
-                        stoppedPos + dir.normalized * contactDist;
-                    return true;
-                }
-            }
-
-            roll.BallTransform.position = newPos;
-        }
-
-        // 到达路径终点
-        return roll.SegIdx >= roll.Waypoints.Length - 1;
     }
 }
 ```
@@ -610,6 +571,118 @@ public class BallDropController : MonoBehaviour
 | `Reset()` | 重置为初始空闲状态，适用于归还对象池前调用 |
 | `IsRunning` | 动画是否正在播放 |
 | `IsFinished` | 动画是否已完成 |
+
+### 8. 落袋后滚动动画（PocketPostRollAniHelper）
+
+`PocketPostRollAniHelper` 是 `PocketDropAniHelper` 的后续阶段，负责驱动已落袋球沿预设路径（`PostPocketRollPath`）滚动直至停止。它是一个纯逻辑类，不持有任何 `MonoBehaviour`、`Transform`、`Renderer` 或 `Material` 引用，单个实例可复用（对象池友好）。
+
+> **PR #74 变更说明（2026-03）**：本类在此 PR 中引入了两项物理正确性修复：
+> 1. **Z 轴漂移修复**：`_startZ` 固定为 `pathPoints[0].z`，所有后续帧的 `state.position.z` 均被钳位到此值。
+> 2. **物理角速度输出**：`PocketPostRollState` 新增 `angularVelocity` 字段（单位：rad/s）。
+
+#### Z 轴漂移修复
+
+**原因**：台面是 XY 平面（Z 轴朝上/朝外）；当路径折线各点的 Z 值略有差异时，线性插值会导致球的 Z 坐标在滚动过程中持续偏移，使球浮离或穿入台面。
+
+**修复方式**：`Start()` 调用时从 `pathPoints[0].z` 捕获 `_startZ`；`PositionAtArcLength()` 在每次返回前强制 `pos.z = _startZ`，`_finalPosition.z` 也同样钳位。
+
+**影响与注意事项**：
+- 调用方传入的 `pathPoints` 各点 Z 值可以不一致（例如从 `SegmentData` 转换时直接取渲染层 Z），helper 会自动忽略并钳位到起点 Z。
+- 如需不同高度的滚动路径（非平面台面），应在传入前自行修正各点的 Z 值，或不依赖此字段。
+
+**验证 Z 轴不再漂移（单元测试风格）：**
+
+```csharp
+var helper = new PocketPostRollAniHelper();
+helper.Start(new PocketPostRollRequest
+{
+    pathPoints = new[]
+    {
+        new Vector3(0f, 0f, 2f),   // 起点 Z = 2
+        new Vector3(5f, 0f, 2.1f), // 中间点 Z 故意不同
+        new Vector3(10f, 0f, 1.9f),
+    },
+    duration   = 1f,
+    ballRadius = 0.286f,
+});
+
+// 在任意采样点，Z 均应等于起点 Z（2.0）
+for (float t = 0f; t <= 1f; t += 0.1f)
+{
+    PocketPostRollState s = helper.Evaluate(t);
+    Debug.Assert(Mathf.Approximately(s.position.z, 2f),
+        $"Z drift detected at t={t}: z={s.position.z}");
+}
+```
+
+#### 物理角速度（angularVelocity）
+
+**含义**：球在无滑动滚动（no-slip）条件下的角速度向量，单位 **rad/s**。
+
+**坐标系与方向约定**：
+- 台面在 **XY 平面**，法线方向为 `Vector3.forward`（`+Z`）。
+- 公式：`ω = Cross(Vector3.forward, linearVelocity) / ballRadius`
+- 向 `+X` 方向滚动 → `ω = (0, +ω, 0)`（绕 Y 轴正向）
+- 向 `+Y` 方向滚动 → `ω = (-ω, 0, 0)`（绕 X 轴负向）
+- 停止或动画结束时为 `Vector3.zero`。
+- 当 `ballRadius <= 0` 时为 `Vector3.zero`。
+
+**`PocketPostRollState` 字段一览：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `position` | `Vector3` | 当前帧建议的球世界坐标（Z 钳位至起点 Z） |
+| `angularVelocity` | `Vector3` | 物理角速度（rad/s），无滑动滚动条件；停止时为 `Vector3.zero` |
+| `phase` | `PocketPostRollPhase` | 当前阶段（`None` / `Rolling` / `Finished`） |
+| `normalizedTime` | `float` | 动画整体进度 0..1 |
+
+**如何读取并应用 angularVelocity：**
+
+```csharp
+// 每帧驱动滚动动画
+if (rollHelper.IsRunning)
+{
+    PocketPostRollState state = rollHelper.Update(Time.deltaTime);
+
+    // 1. 更新位置（Z 不会漂移）
+    ballTransform.position = state.position;
+
+    // 2. 应用物理角速度驱动球的自旋（欧拉积分，适合视觉表现）
+    if (state.angularVelocity != Vector3.zero)
+    {
+        ballTransform.Rotate(
+            state.angularVelocity * Time.deltaTime * Mathf.Rad2Deg,
+            Space.World);
+    }
+
+    // 3. 若接入刚体物理引擎，也可直接赋值
+    // rigidbody.angularVelocity = state.angularVelocity;
+}
+```
+
+**`PocketPostRollRequest` 参数一览：**
+
+| 参数 | 说明 |
+|------|------|
+| `pathPoints` | 路径折线点数组（至少 2 个）：`[start, CP0, …, end]` |
+| `duration` | 全程动画总时长（秒）；`<= 0` 使用默认值 1.0 s |
+| `ballRadius` | 球半径（世界单位），用于碰撞检测与 `angularVelocity` 计算 |
+| `isCueBall` | 是否为母球；为 `true` 时停止后触发 `OnCueBallRetrieved` 回调 |
+| `stoppedBalls` | 已停在路径上的球信息数组（`StoppedBallInfo[]`），可为 `null` |
+
+**公共 API：**
+
+| 方法 / 属性 | 说明 |
+|------------|------|
+| `Start(in PocketPostRollRequest)` | 启动（或复用实例重新启动）滚动动画 |
+| `Update(float deltaTime)` | 按帧推进动画，返回当前 `PocketPostRollState`（无堆分配） |
+| `Evaluate(float normalizedTime)` | 在任意归一化时间采样状态，不修改内部状态 |
+| `Stop()` | 立即停止（不标记为 Finished） |
+| `Reset()` | 重置为空闲状态（归还对象池前调用） |
+| `IsRunning` | 动画是否正在播放 |
+| `IsFinished` | 动画是否已完成 |
+| `OnStop` | `Action<Vector3>`，球停止时触发，参数为停止位置 |
+| `OnCueBallRetrieved` | `Action`，母球停止后触发（`isCueBall == true` 时） |
 
 ## 物理参数说明
 
