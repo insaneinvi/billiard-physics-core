@@ -36,6 +36,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 
 using UnityEngine;
+using BilliardPhysics;
 
 namespace BilliardPhysics.AniHelp
 {
@@ -89,6 +90,31 @@ namespace BilliardPhysics.AniHelp
         /// <see cref="startPos"/>–<see cref="pocketPos"/> displacement. 0.25 = 25 % of the way.
         /// </summary>
         public float attractStrength;
+
+        /// <summary>
+        /// Optional Ball instance. When non-null, <see cref="startPos"/> is derived
+        /// from <c>ball.Position</c> combined with <see cref="tableZ"/>.
+        /// <c>ball.LinearVelocity</c> biases the attract direction so the drop
+        /// feels like a natural continuation of the ball's motion.
+        /// <c>ball.AngularVelocity.Z</c> seeds the conical-pocket spiral unless
+        /// <see cref="sinkSpin"/> is also set.
+        /// </summary>
+        public Ball ball;
+
+        /// <summary>
+        /// World-space Z of the table surface. Only used when <see cref="ball"/> is
+        /// non-null to convert the 2-D physics position to a 3-D world position.
+        /// </summary>
+        public float tableZ;
+
+        /// <summary>
+        /// Spiral radius (world units) during the Sink phase that models the
+        /// conical pocket mouth. The ball orbits around the drop axis with this
+        /// initial radius, shrinking to zero as it reaches the pocket bottom.
+        /// When zero and <see cref="ball"/> is non-null, an automatic radius is
+        /// derived from <c>|ball.AngularVelocity.Z|</c>.
+        /// </summary>
+        public float sinkSpin;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -125,7 +151,9 @@ namespace BilliardPhysics.AniHelp
     /// Pure-logic, GC-free helper that drives the three-phase "ball pocketed" animation:
     /// <list type="number">
     ///   <item><b>Attract</b> – ball slides slightly toward the pocket (EaseOut).</item>
-    ///   <item><b>Sink</b>    – ball drops along world <c>-Z</c> (EaseIn).</item>
+    ///   <item><b>Sink</b>    – ball drops along world <c>-Z</c> (EaseIn), optionally
+    ///     with a conical-pocket spiral driven by <see cref="PocketDropRequest.sinkSpin"/>
+    ///     or the ball's side-spin (<c>AngularVelocity.Z</c>).</item>
     ///   <item><b>Vanish</b>  – ball shrinks to zero scale, alpha fades slightly (EaseIn).</item>
     /// </list>
     /// One instance is reusable: call <see cref="StartDrop"/> multiple times.
@@ -153,6 +181,10 @@ namespace BilliardPhysics.AniHelp
         private float   _duration;
         private float   _attractEnd;      // normalised time boundary: end of Attract
         private float   _sinkEnd;         // normalised time boundary: end of Sink
+
+        // Conical-pocket spiral state
+        private float   _sinkSpin;        // initial spiral radius (world units); 0 = no spiral
+        private float   _sinkSpinOffset;  // initial orbit angle (radians)
 
         // ── Public API ────────────────────────────────────────────────────────
 
@@ -206,10 +238,61 @@ namespace BilliardPhysics.AniHelp
             float strength = req.attractStrength > 0f ? req.attractStrength : DefaultAttractStrength;
             float depth    = req.sinkDepth >= 0f ? req.sinkDepth : DefaultSinkDepth;
 
-            _startPos      = req.startPos;
-            _attractTarget = req.startPos + (req.pocketPos - req.startPos) * strength;
+            // When a Ball instance is provided, derive startPos from its physics position.
+            if (req.ball != null)
+            {
+                _startPos = new Vector3(
+                    req.ball.Position.X.ToFloat(),
+                    req.ball.Position.Y.ToFloat(),
+                    req.tableZ);
+            }
+            else
+            {
+                _startPos = req.startPos;
+            }
+
+            _attractTarget = _startPos + (req.pocketPos - _startPos) * strength;
+
+            // When a Ball is provided, bias the attract target using the ball's
+            // linear velocity so the entry angle feels like a natural continuation
+            // of the ball's motion just before pocketing.
+            if (req.ball != null)
+            {
+                float lx = req.ball.LinearVelocity.X.ToFloat();
+                float ly = req.ball.LinearVelocity.Y.ToFloat();
+                float speedSq = lx * lx + ly * ly;
+                if (speedSq > 1e-6f)
+                {
+                    float velLen = Mathf.Sqrt(speedSq);
+                    // Offset attract target a small fraction in the ball's travel direction.
+                    float biasScale = strength * depth * 0.5f;
+                    _attractTarget += new Vector3(lx / velLen, ly / velLen, 0f) * biasScale;
+                }
+            }
+
             _sinkStartPos  = _attractTarget;
             _sinkEndPos    = _sinkStartPos + Vector3.back * depth;
+
+            // ── Conical-pocket spiral ─────────────────────────────────────────
+            // Derive spiral radius from explicit sinkSpin or from ball's side-spin.
+            float spin = req.sinkSpin;
+            if (spin == 0f && req.ball != null)
+                spin = Mathf.Abs(req.ball.AngularVelocity.Z.ToFloat()) * depth * 0.15f;
+            _sinkSpin = spin;
+
+            // Initial orbit angle: align with the direction the ball was travelling.
+            if (req.ball != null)
+            {
+                float lx = req.ball.LinearVelocity.X.ToFloat();
+                float ly = req.ball.LinearVelocity.Y.ToFloat();
+                _sinkSpinOffset = (lx * lx + ly * ly) > 1e-6f
+                    ? Mathf.Atan2(ly, lx)
+                    : 0f;
+            }
+            else
+            {
+                _sinkSpinOffset = 0f;
+            }
 
             // ── Reset playback ────────────────────────────────────────────────
             _elapsed    = 0f;
@@ -281,6 +364,17 @@ namespace BilliardPhysics.AniHelp
                 state.position = Vector3.LerpUnclamped(_sinkStartPos, _sinkEndPos, eased);
                 state.scale    = 1f;
                 state.alpha    = 1f;
+
+                // Conical-pocket spiral: the ball orbits around the drop axis
+                // with a radius that shrinks to zero as it reaches the pocket
+                // bottom, simulating the narrowing funnel of a conical pocket.
+                if (_sinkSpin > 0f)
+                {
+                    float orbitRadius = _sinkSpin * (1f - phaseT) * (1f - phaseT);
+                    float orbitAngle  = _sinkSpinOffset + phaseT * Mathf.PI;
+                    state.position.x += Mathf.Cos(orbitAngle) * orbitRadius;
+                    state.position.y += Mathf.Sin(orbitAngle) * orbitRadius;
+                }
             }
             else
             {
@@ -311,9 +405,11 @@ namespace BilliardPhysics.AniHelp
         /// </summary>
         public void Reset()
         {
-            _isRunning  = false;
-            _isFinished = false;
-            _elapsed    = 0f;
+            _isRunning      = false;
+            _isFinished     = false;
+            _elapsed        = 0f;
+            _sinkSpin       = 0f;
+            _sinkSpinOffset = 0f;
         }
 
         // ── Private helpers ───────────────────────────────────────────────────
