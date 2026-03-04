@@ -564,7 +564,7 @@ namespace BilliardPhysics.Tests
                 ballRadius = 0.1f,
             });
 
-            PocketPostRollState state = h.Update(2f);
+            PocketPostRollState state = h.Update(2f); // overshoot past duration → guaranteed Finished
 
             Assert.AreEqual(8f, state.position.x, Eps, "rollPath should override pathPoints.");
         }
