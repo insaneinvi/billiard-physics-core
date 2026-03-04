@@ -48,15 +48,19 @@ namespace BilliardPhysics.Editor
         /// <param name="segments">
         /// Flat list of runtime segments loaded from the fixed binary asset.
         /// </param>
+        /// <param name="postPocketRollPath">
+        /// Optional post-pocket roll path segment loaded from a v4 asset.
+        /// When non-null its data is mapped to <see cref="TableConfig.PostPocketRollPath"/>.
+        /// </param>
         /// <returns>
         /// A <see cref="TableConfig"/> whose <c>Segments</c> list contains one
         /// entry per connected polyline chain found in <paramref name="segments"/>.
         /// </returns>
-        public static TableConfig BuildTableConfig(List<Segment> segments)
+        public static TableConfig BuildTableConfig(List<Segment> segments, Segment postPocketRollPath = null)
         {
             var segsData = new List<SegmentData>();
             if (segments == null || segments.Count == 0)
-                return new TableConfig { Segments = segsData };
+                return BuildResult(segsData, postPocketRollPath);
 
             int i = 0;
             while (i < segments.Count)
@@ -105,7 +109,7 @@ namespace BilliardPhysics.Editor
                 }
             }
 
-            return new TableConfig { Segments = segsData };
+            return BuildResult(segsData, postPocketRollPath);
         }
 
         /// <summary>
@@ -149,6 +153,28 @@ namespace BilliardPhysics.Editor
                 });
             }
             return result;
+        }
+
+        // ── Private helpers ───────────────────────────────────────────────────
+
+        private static TableConfig BuildResult(List<SegmentData> segsData, Segment postPocketRollPath)
+        {
+            var tableConfig = new TableConfig { Segments = segsData };
+            if (postPocketRollPath != null)
+            {
+                var rollSeg = new SegmentData();
+                rollSeg.Start = new Vector2(
+                    Fix64ToFloat(postPocketRollPath.Start.X),
+                    Fix64ToFloat(postPocketRollPath.Start.Y));
+                rollSeg.End = new Vector2(
+                    Fix64ToFloat(postPocketRollPath.End.X),
+                    Fix64ToFloat(postPocketRollPath.End.Y));
+                if (postPocketRollPath.ConnectionPoints != null)
+                    foreach (FixVec2 cp in postPocketRollPath.ConnectionPoints)
+                        rollSeg.ConnectionPoints.Add(new Vector2(Fix64ToFloat(cp.X), Fix64ToFloat(cp.Y)));
+                tableConfig.PostPocketRollPath = rollSeg;
+            }
+            return tableConfig;
         }
     }
 }
