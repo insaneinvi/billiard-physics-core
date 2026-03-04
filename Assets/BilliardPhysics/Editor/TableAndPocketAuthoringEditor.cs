@@ -16,6 +16,8 @@ namespace BilliardPhysics.Editor
         private static readonly Color s_pocketRimColor    = Color.yellow;
         private static readonly Color s_pocketRimSelColor = Color.red;
         private static readonly Color s_handleColor       = Color.white;
+        // Orange: distinguishes the post-pocket roll path from rim segments (yellow).
+        private static readonly Color s_rollPathColor     = new Color(1f, 0.5f, 0f, 0.9f);
 
         // ── Selection ─────────────────────────────────────────────────────
         private enum SelectionKind { None, TableSegment, PocketRimSegment }
@@ -327,6 +329,17 @@ namespace BilliardPhysics.Editor
                     SceneView.RepaintAll();
                 }
             }
+
+            // ── Post-Pocket Roll Path ─────────────────────────────────────
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("Post-Pocket Roll Path", EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox(
+                "每个球袋的 PostPocketRollPath（SegmentData）定义了球落袋动画完成后的滚动路径：\n" +
+                "Start → CP[0] → CP[1] → … → End\n" +
+                "Start == End 且无 ConnectionPoints 时不触发滚动。\n" +
+                "运行时由 BallDropController 在动画完成后读取，驱动球沿路径移动。\n" +
+                "路径在场景视图中以橙色显示。",
+                MessageType.Info);
 
             // ── Fixed-Point Binary Export / Import ────────────────────────
             EditorGUILayout.Space();
@@ -901,6 +914,50 @@ namespace BilliardPhysics.Editor
                         }
                     }
                 }
+            }
+
+            // ── Draw post-pocket roll paths (orange) ──────────────────────
+            var authRoll = (TableAndPocketAuthoring)target;
+            for (int i = 0; i < authRoll.Pockets.Count; i++)
+            {
+                var rollPath = authRoll.Pockets[i]?.PostPocketRollPath;
+                if (rollPath == null) continue;
+
+                Vector3 rs = new Vector3(rollPath.Start.x, rollPath.Start.y, 0f);
+                Vector3 re = new Vector3(rollPath.End.x,   rollPath.End.y,   0f);
+
+                // Only draw if the path has meaningful length.
+                bool hasCPs = rollPath.ConnectionPoints != null &&
+                              rollPath.ConnectionPoints.Count > 0;
+                if (!hasCPs && rs == re) continue;
+
+                Handles.color = s_rollPathColor;
+                if (hasCPs)
+                {
+                    // Draw polyline: Start → CP[0] → … → End
+                    Vector3 prev = rs;
+                    foreach (var cp in rollPath.ConnectionPoints)
+                    {
+                        Vector3 cpv = new Vector3(cp.x, cp.y, 0f);
+                        Handles.DrawLine(prev, cpv);
+                        prev = cpv;
+                    }
+                    Handles.DrawLine(prev, re);
+                }
+                else
+                {
+                    Handles.DrawLine(rs, re);
+                }
+
+                // Arrow at the end point to indicate direction (use last sub-segment)
+                Vector3 arrowFrom = hasCPs
+                    ? new Vector3(rollPath.ConnectionPoints[rollPath.ConnectionPoints.Count - 1].x,
+                                  rollPath.ConnectionPoints[rollPath.ConnectionPoints.Count - 1].y, 0f)
+                    : rs;
+                Vector3 toEnd = (re - arrowFrom).normalized;
+                if (toEnd.sqrMagnitude > 0.0001f)
+                    Handles.ArrowHandleCap(0, re,
+                        Quaternion.LookRotation(toEnd), 0.08f, EventType.Repaint);
             }
 
             if (changed)
