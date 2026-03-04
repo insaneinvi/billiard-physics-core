@@ -5,6 +5,7 @@ using BilliardPhysics;
 using BilliardPhysics.Runtime.BallInfo;
 using BilliardPhysics.Runtime.ViewTool;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using Random = System.Random;
 
 public class BilliardWorld : MonoBehaviour
@@ -146,6 +147,10 @@ public class BilliardWorld : MonoBehaviour
     {
         if (Input.GetMouseButtonDown(0))
         {
+            if (EventSystem.current.IsPointerOverGameObject())
+            {
+                return;
+            }
             isDragging = true;
         }
 
@@ -155,7 +160,7 @@ public class BilliardWorld : MonoBehaviour
             aimRenderer.UpdateAimPoint(aimPoint);
         }
 
-        if (Input.GetMouseButtonUp(0))
+        if (isDragging && Input.GetMouseButtonUp(0))
         {
             isDragging = false;
         }
