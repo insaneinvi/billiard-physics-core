@@ -1,5 +1,6 @@
 using NUnit.Framework;
 using UnityEngine;
+using BilliardPhysics;
 using BilliardPhysics.AniHelp;
 
 namespace BilliardPhysics.Tests
@@ -458,6 +459,219 @@ namespace BilliardPhysics.Tests
             Assert.IsTrue(h.IsRunning);
             PocketPostRollState mid = h.Evaluate(0.5f);
             Assert.AreEqual(3.5f, mid.position.y, Eps);
+        }
+
+        // ── Ball instance integration ─────────────────────────────────────────
+
+        [Test]
+        public void BallInstance_OverridesBallRadius()
+        {
+            // Ball with radius 0.3; ballRadius = 0.5 in request should be overridden.
+            var ball = new Ball(7);
+            // Ball(id) uses StandardRadius ≈ 0.28575
+            var h = MakeHelper();
+            h.Start(new PocketPostRollRequest
+            {
+                pathPoints = new[] { Vector3.zero, new Vector3(10f, 0f, 0f) },
+                duration   = 2f,
+                ballRadius = 0.5f,  // should be overridden by ball.Radius
+                ball       = ball,
+            });
+
+            PocketPostRollState state = h.Evaluate(0.5f);
+
+            // The angular velocity must be computed using ball.Radius, not 0.5.
+            // ω = Cross((0,0,1), (speed, 0, 0)) / radius
+            // speed = 10/2 = 5; radius = 0.28575
+            float expectedRadius = ball.Radius.ToFloat();
+            float expectedOmegaY = 5f / expectedRadius;
+            Assert.AreEqual(expectedOmegaY, state.angularVelocity.y, 1e-2f,
+                "Ball.Radius should override ballRadius in angularVelocity computation.");
+        }
+
+        // ── SegmentData rollPath ──────────────────────────────────────────────
+
+        [Test]
+        public void RollPath_SegmentData_TwoPoints_PositionAtEnd()
+        {
+            var seg = new SegmentData
+            {
+                Start = new Vector2(0f, 0f),
+                End   = new Vector2(6f, 0f),
+            };
+
+            var h = MakeHelper();
+            h.Start(new PocketPostRollRequest
+            {
+                rollPath   = seg,
+                tableZ     = 1f,
+                duration   = 1f,
+                ballRadius = 0.1f,
+            });
+
+            PocketPostRollState state = h.Update(1.0f);
+
+            Assert.AreEqual(PocketPostRollPhase.Finished, state.phase);
+            Assert.AreEqual(6f, state.position.x, Eps, "End X should match SegmentData.End.x");
+            Assert.AreEqual(0f, state.position.y, Eps, "End Y should match SegmentData.End.y");
+            Assert.AreEqual(1f, state.position.z, Eps, "Z should equal tableZ");
+        }
+
+        [Test]
+        public void RollPath_SegmentData_WithConnectionPoints_CorrectWaypoints()
+        {
+            // Start=(0,0) → CP=(3,3) → End=(6,0)
+            var seg = new SegmentData
+            {
+                Start = new Vector2(0f, 0f),
+                End   = new Vector2(6f, 0f),
+            };
+            seg.ConnectionPoints.Add(new Vector2(3f, 3f));
+
+            var h = MakeHelper();
+            h.Start(new PocketPostRollRequest
+            {
+                rollPath   = seg,
+                tableZ     = 0f,
+                duration   = 2f,
+                ballRadius = 0.1f,
+            });
+
+            Assert.IsTrue(h.IsRunning, "Should be running with a valid SegmentData path.");
+
+            PocketPostRollState end = h.Update(2f);
+            Assert.AreEqual(PocketPostRollPhase.Finished, end.phase);
+            Assert.AreEqual(6f, end.position.x, Eps);
+        }
+
+        [Test]
+        public void RollPath_OverridesPathPoints_WhenBothSet()
+        {
+            // rollPath leads to x=8; pathPoints leads to x=20.  rollPath wins.
+            var seg = new SegmentData
+            {
+                Start = new Vector2(0f, 0f),
+                End   = new Vector2(8f, 0f),
+            };
+
+            var h = MakeHelper();
+            h.Start(new PocketPostRollRequest
+            {
+                rollPath   = seg,
+                tableZ     = 0f,
+                pathPoints = new[] { Vector3.zero, new Vector3(20f, 0f, 0f) }, // should be ignored
+                duration   = 1f,
+                ballRadius = 0.1f,
+            });
+
+            PocketPostRollState state = h.Update(2f);
+
+            Assert.AreEqual(8f, state.position.x, Eps, "rollPath should override pathPoints.");
+        }
+
+        // ── Rolling friction / energy loss ────────────────────────────────────
+
+        [Test]
+        public void RollingFriction_Zero_SpeedIsConstant()
+        {
+            // With rollingFriction = 0, angularVelocity should be the same at t=0.1 and t=0.9.
+            var h = MakeHelper();
+            h.Start(new PocketPostRollRequest
+            {
+                pathPoints      = new[] { Vector3.zero, new Vector3(10f, 0f, 0f) },
+                duration        = 2f,
+                ballRadius      = 0.5f,
+                rollingFriction = 0f,
+            });
+
+            PocketPostRollState s1 = h.Evaluate(0.1f);
+            PocketPostRollState s2 = h.Evaluate(0.9f);
+
+            Assert.AreEqual(s1.angularVelocity.y, s2.angularVelocity.y, Eps,
+                "Zero friction should produce constant angular velocity.");
+        }
+
+        [Test]
+        public void RollingFriction_Positive_SpeedDecaysAlongPath()
+        {
+            // With rollingFriction > 0, angular velocity at t=0.9 must be less than at t=0.1.
+            var h = MakeHelper();
+            h.Start(new PocketPostRollRequest
+            {
+                pathPoints      = new[] { Vector3.zero, new Vector3(10f, 0f, 0f) },
+                duration        = 2f,
+                ballRadius      = 0.5f,
+                rollingFriction = 2f,
+            });
+
+            PocketPostRollState s1 = h.Evaluate(0.1f);
+            PocketPostRollState s2 = h.Evaluate(0.9f);
+
+            Assert.Greater(s1.angularVelocity.y, s2.angularVelocity.y,
+                "Positive friction should cause angular velocity to decay toward path end.");
+        }
+
+        [Test]
+        public void RollingFriction_DoesNotAffectPosition()
+        {
+            // rollingFriction only affects speed (angular velocity), not the position path.
+            var h = MakeHelper();
+            h.Start(new PocketPostRollRequest
+            {
+                pathPoints      = new[] { Vector3.zero, new Vector3(10f, 0f, 0f) },
+                duration        = 2f,
+                ballRadius      = 0.5f,
+                rollingFriction = 5f,
+            });
+
+            // At t=0.5 (midpoint), position should still be at x=5 regardless of friction.
+            PocketPostRollState state = h.Evaluate(0.5f);
+            Assert.AreEqual(5f, state.position.x, Eps,
+                "rollingFriction must not alter position on the path.");
+        }
+
+        // ── Initial spin angle ────────────────────────────────────────────────
+
+        [Test]
+        public void InitialSpinAngle_IsInValidRange()
+        {
+            var h = MakeHelper();
+            h.Start(SimpleRequest());
+
+            PocketPostRollState state = h.Evaluate(0.5f);
+
+            Assert.GreaterOrEqual(state.initialSpinAngle, 0f,
+                "initialSpinAngle must be >= 0");
+            Assert.Less(state.initialSpinAngle, Mathf.PI * 2f,
+                "initialSpinAngle must be < 2π");
+        }
+
+        [Test]
+        public void InitialSpinAngle_ConsistentAcrossEvaluateCalls()
+        {
+            // initialSpinAngle must be the same regardless of which normalizedTime is sampled.
+            var h = MakeHelper();
+            h.Start(SimpleRequest());
+
+            float angle0 = h.Evaluate(0f).initialSpinAngle;
+            float angle5 = h.Evaluate(0.5f).initialSpinAngle;
+            float angle1 = h.Evaluate(1f).initialSpinAngle;
+
+            Assert.AreEqual(angle0, angle5, Eps, "initialSpinAngle must be constant at t=0 vs t=0.5");
+            Assert.AreEqual(angle0, angle1, Eps, "initialSpinAngle must be constant at t=0 vs t=1");
+        }
+
+        [Test]
+        public void InitialSpinAngle_IsZeroAfterReset()
+        {
+            var h = MakeHelper();
+            h.Start(SimpleRequest());
+            h.Reset();
+
+            // After reset, if Evaluate is called on an idle helper the returned
+            // angle defaults to 0 (the field's zero value).
+            PocketPostRollState state = h.Evaluate(0f);
+            Assert.AreEqual(0f, state.initialSpinAngle, Eps);
         }
     }
 }

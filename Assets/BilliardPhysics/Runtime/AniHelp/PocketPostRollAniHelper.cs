@@ -44,6 +44,7 @@
 // ──────────────────────────────────────────────────────────────────────────
 
 using UnityEngine;
+using BilliardPhysics;
 
 namespace BilliardPhysics.AniHelp
 {
@@ -93,8 +94,24 @@ namespace BilliardPhysics.AniHelp
         /// so that state is continuous between the two animations.
         /// Must contain at least two points; passing null or fewer than two
         /// points results in an immediately-finished animation.
+        /// Ignored when <see cref="rollPath"/> is non-null.
         /// </summary>
         public Vector3[] pathPoints;
+
+        /// <summary>
+        /// Roll path as a <see cref="SegmentData"/> (Start / ConnectionPoints / End)
+        /// sourced directly from <c>TableConfig.PostPocketRollPath</c>.
+        /// When non-null this overrides <see cref="pathPoints"/>; the 2-D waypoints
+        /// are elevated to 3-D using <see cref="tableZ"/>.
+        /// </summary>
+        public SegmentData rollPath;
+
+        /// <summary>
+        /// World-space Z of the table surface, used to convert 2-D
+        /// <see cref="rollPath"/> waypoints to 3-D world positions.
+        /// Only meaningful when <see cref="rollPath"/> is non-null.
+        /// </summary>
+        public float tableZ;
 
         /// <summary>
         /// Total animation duration in seconds for the full path length.
@@ -108,6 +125,7 @@ namespace BilliardPhysics.AniHelp
         /// Radius of the rolling ball in world units.
         /// Used together with each <see cref="StoppedBallInfo.radius"/> to
         /// determine contact distance (r_rolling + r_stopped).
+        /// Overridden by <c>ball.Radius</c> when <see cref="ball"/> is non-null.
         /// </summary>
         public float ballRadius;
 
@@ -123,6 +141,20 @@ namespace BilliardPhysics.AniHelp
         /// May be <c>null</c> or empty.
         /// </summary>
         public StoppedBallInfo[] stoppedBalls;
+
+        /// <summary>
+        /// Optional Ball instance. When non-null, <see cref="ballRadius"/> is
+        /// overridden by <c>ball.Radius</c> converted to world units.
+        /// </summary>
+        public Ball ball;
+
+        /// <summary>
+        /// Rolling friction coefficient (≥ 0) for energy-loss simulation.
+        /// At 0 (default) rolling speed is constant—identical to previous behaviour.
+        /// Higher values cause the instantaneous linear and angular speed to decay
+        /// exponentially toward the end of the path, simulating cloth friction.
+        /// </summary>
+        public float rollingFriction;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -141,6 +173,7 @@ namespace BilliardPhysics.AniHelp
         /// <summary>
         /// Angular velocity (rad/s) for physically correct rolling (no-slip condition).
         /// Computed as <c>Cross(Vector3.forward, linearVelocity) / ballRadius</c>.
+        /// Decays exponentially when <see cref="PocketPostRollRequest.rollingFriction"/> &gt; 0.
         /// Zero when the ball is stopped or the animation is finished.
         /// </summary>
         public Vector3 angularVelocity;
@@ -150,6 +183,15 @@ namespace BilliardPhysics.AniHelp
 
         /// <summary>Overall progress through the animation, 0..1.</summary>
         public float normalizedTime;
+
+        /// <summary>
+        /// Random initial rotation angle (radians, in [0, 2π)) generated once
+        /// when <see cref="PocketPostRollAniHelper.Start"/> is called.
+        /// Apply this as an initial spin offset to the ball's 3-D model rotation
+        /// so that each ball entering the pocket starts from a visually varied
+        /// orientation.  Constant throughout the animation.
+        /// </summary>
+        public float initialSpinAngle;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -185,6 +227,8 @@ namespace BilliardPhysics.AniHelp
         private float   _duration;
         private bool    _isCueBall;
         private float   _ballRadius;
+        private float   _rollingFriction;
+        private float   _initialSpinAngle;
 
         // Effective (possibly clipped) path data
         private Vector3[] _waypoints;          // full path waypoints
@@ -222,13 +266,33 @@ namespace BilliardPhysics.AniHelp
         /// </summary>
         public void Start(in PocketPostRollRequest req)
         {
-            _isCueBall  = req.isCueBall;
-            _duration   = req.duration > 0f ? req.duration : DefaultDuration;
-            _ballRadius = req.ballRadius;
+            _isCueBall       = req.isCueBall;
+            _duration        = req.duration > 0f ? req.duration : DefaultDuration;
+            _rollingFriction = Mathf.Max(0f, req.rollingFriction);
+
+            // Ball radius: prefer the physics Ball's radius when provided.
+            _ballRadius = (req.ball != null)
+                ? req.ball.Radius.ToFloat()
+                : req.ballRadius;
+
+            // Random initial spin angle: a fresh random orientation each time
+            // Start is called so each ball visually begins from a varied pose.
+            _initialSpinAngle = UnityEngine.Random.Range(0f, Mathf.PI * 2f);
 
             // ── Build waypoints ───────────────────────────────────────────────
-            _waypoints = (req.pathPoints != null && req.pathPoints.Length >= 2)
-                ? req.pathPoints
+            // rollPath (SegmentData) takes priority over pathPoints when provided.
+            Vector3[] resolvedPoints = null;
+            if (req.rollPath != null)
+            {
+                resolvedPoints = BuildWaypointsFromSegmentData(req.rollPath, req.tableZ);
+            }
+            else if (req.pathPoints != null && req.pathPoints.Length >= 2)
+            {
+                resolvedPoints = req.pathPoints;
+            }
+
+            _waypoints = (resolvedPoints != null && resolvedPoints.Length >= 2)
+                ? resolvedPoints
                 : null;
 
             _startZ = (_waypoints != null) ? _waypoints[0].z : 0f;
@@ -237,8 +301,8 @@ namespace BilliardPhysics.AniHelp
             {
                 // Degenerate path – finish immediately.
                 _totalLength   = 0f;
-                _finalPosition = (req.pathPoints != null && req.pathPoints.Length > 0)
-                    ? req.pathPoints[0]
+                _finalPosition = (resolvedPoints != null && resolvedPoints.Length > 0)
+                    ? resolvedPoints[0]
                     : Vector3.zero;
                 _isRunning  = false;
                 _isFinished = true;
@@ -262,7 +326,7 @@ namespace BilliardPhysics.AniHelp
             {
                 foreach (var sb in req.stoppedBalls)
                 {
-                    float contactDist = req.ballRadius + sb.radius;
+                    float contactDist = _ballRadius + sb.radius;
                     float arcLen      = FindContactArcLength(_waypoints, contactDist, sb.position);
                     if (arcLen < blockArcLen)
                         blockArcLen = arcLen;
@@ -326,7 +390,8 @@ namespace BilliardPhysics.AniHelp
             float t = Mathf.Clamp01(normalizedTime);
 
             PocketPostRollState state;
-            state.normalizedTime = t;
+            state.normalizedTime  = t;
+            state.initialSpinAngle = _initialSpinAngle;
 
             if (t >= 1f || _totalLength <= 0f || _waypoints == null)
             {
@@ -343,8 +408,12 @@ namespace BilliardPhysics.AniHelp
             // Angular velocity for physically correct rolling (no-slip condition):
             //   ω = Cross(surfaceNormal, linearVelocity) / ballRadius
             // Surface normal is Vector3.forward (Z-up, table in the XY plane).
-            Vector3 dir   = DirectionAtArcLength(arcLen);
-            float   speed = _duration > 0f ? _totalLength / _duration : 0f;
+            // Speed decays exponentially when rollingFriction > 0, simulating
+            // energy loss due to cloth friction as the ball travels the path.
+            Vector3 dir      = DirectionAtArcLength(arcLen);
+            float   baseSpeed = _duration > 0f ? _totalLength / _duration : 0f;
+            float   decay     = _rollingFriction > 0f ? Mathf.Exp(-_rollingFriction * t) : 1f;
+            float   speed     = baseSpeed * decay;
             state.angularVelocity = _ballRadius > 0f
                 ? Vector3.Cross(Vector3.forward, dir * speed) / _ballRadius
                 : Vector3.zero;
@@ -365,12 +434,39 @@ namespace BilliardPhysics.AniHelp
         /// </summary>
         public void Reset()
         {
-            _isRunning  = false;
-            _isFinished = false;
-            _elapsed    = 0f;
+            _isRunning        = false;
+            _isFinished       = false;
+            _elapsed          = 0f;
+            _rollingFriction  = 0f;
+            _initialSpinAngle = 0f;
         }
 
         // ── Private helpers ───────────────────────────────────────────────────
+
+        /// <summary>
+        /// Converts a <see cref="SegmentData"/> (2-D Start/ConnectionPoints/End)
+        /// into a <c>Vector3[]</c> waypoint array for use by the animation.
+        /// The Z coordinate of every waypoint is set to <paramref name="tableZ"/>.
+        /// Returns <c>null</c> when the segment data does not define a valid path
+        /// (fewer than two distinct points).
+        /// </summary>
+        private static Vector3[] BuildWaypointsFromSegmentData(SegmentData seg, float tableZ)
+        {
+            if (seg == null)
+                return null;
+
+            int cpCount = seg.ConnectionPoints != null ? seg.ConnectionPoints.Count : 0;
+            // Total points: Start + CPs + End
+            var pts = new Vector3[2 + cpCount];
+            pts[0] = new Vector3(seg.Start.x, seg.Start.y, tableZ);
+            for (int i = 0; i < cpCount; i++)
+                pts[1 + i] = new Vector3(
+                    seg.ConnectionPoints[i].x,
+                    seg.ConnectionPoints[i].y,
+                    tableZ);
+            pts[pts.Length - 1] = new Vector3(seg.End.x, seg.End.y, tableZ);
+            return pts;
+        }
 
         /// <summary>
         /// Returns the world-space position on the polyline at
@@ -484,10 +580,11 @@ namespace BilliardPhysics.AniHelp
         private PocketPostRollState BuildFinishedState()
         {
             PocketPostRollState state;
-            state.phase           = PocketPostRollPhase.Finished;
-            state.position        = _finalPosition;
-            state.angularVelocity = Vector3.zero;
-            state.normalizedTime  = 1f;
+            state.phase            = PocketPostRollPhase.Finished;
+            state.position         = _finalPosition;
+            state.angularVelocity  = Vector3.zero;
+            state.normalizedTime   = 1f;
+            state.initialSpinAngle = _initialSpinAngle;
             return state;
         }
     }
