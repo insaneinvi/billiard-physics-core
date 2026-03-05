@@ -389,7 +389,6 @@ public class BallDropController : MonoBehaviour
                 roll.BallData.AngularVelocity = FixVec3.Zero;
 
                 // Notify the presentation layer to hide the ball (or return it to a pool).
-                OnBallHide?.Invoke(roll.BallData.Id);
                 _activeRolls.RemoveAt(i);
             }
         }

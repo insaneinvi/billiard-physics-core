@@ -354,6 +354,8 @@ public class BilliardWorld : MonoBehaviour
     private void OnBallAnimationUpdateHandler(int ballId, Vector3 worldPos, float scale, Quaternion rotation, bool isRolling)
     {
         if (!ballDict.TryGetValue(ballId, out GameObject ballObj)) return;
+        if (isRolling)
+            worldPos.z = 1;
         ballObj.transform.SetPositionAndRotation(worldPos, rotation);
         ballObj.transform.localScale = ballOriginScale * scale;
 
@@ -367,6 +369,7 @@ public class BilliardWorld : MonoBehaviour
     /// </summary>
     private void OnBallHideHandler(int ballId)
     {
-
+        if (!ballDict.TryGetValue(ballId, out GameObject ballObj)) return;
+        ballObj.SetActive(false);
     }
 }
