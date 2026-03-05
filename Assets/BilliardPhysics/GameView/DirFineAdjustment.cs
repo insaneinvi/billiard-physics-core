@@ -8,22 +8,17 @@ public class DirFineAdjustment :
     IDragHandler,
     IPointerUpHandler
 {
-        [Header("References")]
-[Header("References")]
+    [Header("References")]
     public RectTransform rollNode;
     public RectTransform dragArea; // DirFineAdjustment
-
+    
     [Header("Ruler Settings")]
     public float width = 580f;
     public float valuePerPixel = 1f;
 
-    [Header("Inertia")]
-    public float deceleration = 10f;
-
     // ===== 对外事件 =====
-    public event Action<float> OnDeltaX;     // 每次移动的deltaX
+    public event Action<float> OnDeltaValue;     // 每次移动的deltaX
 
-    private float velocity;
     private float totalValue;
 
     private Vector2 lastLocalPoint;
@@ -34,7 +29,6 @@ public class DirFineAdjustment :
     public void OnPointerDown(PointerEventData eventData)
     {
         dragging = true;
-        velocity = 0f;
 
         RectTransformUtility.ScreenPointToLocalPointInRectangle(
             dragArea,
@@ -59,8 +53,6 @@ public class DirFineAdjustment :
         lastLocalPoint = localPoint;
 
         Move(deltaX);
-
-        velocity = deltaX / Time.unscaledDeltaTime;
     }
 
     public void OnPointerUp(PointerEventData eventData)
@@ -69,18 +61,6 @@ public class DirFineAdjustment :
     }
 
     #endregion
-
-    void Update()
-    {
-        if (!dragging && Mathf.Abs(velocity) > 0.1f)
-        {
-            float deltaX = velocity * Time.unscaledDeltaTime;
-
-            Move(deltaX);
-
-            velocity *= Mathf.Exp(-deceleration * Time.unscaledDeltaTime);
-        }
-    }
 
     void Move(float deltaX)
     {
@@ -100,13 +80,12 @@ public class DirFineAdjustment :
         totalValue += deltaValue;
 
         // ===== 触发事件 =====
-        OnDeltaX?.Invoke(deltaX);
+        OnDeltaValue?.Invoke(deltaValue);
     }
 
     public void ResetValue(float value = 0)
     {
         totalValue = value;
         rollNode.anchoredPosition = Vector2.zero;
-        velocity = 0;
     }
 }

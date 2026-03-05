@@ -46,9 +46,9 @@ namespace BilliardPhysics
             Inertia = two / five * mass * radius * radius;
 
             Restitution     = Fix64.From(95)  / Fix64.From(100);  // 0.95
-            SlidingFriction = Fix64.From(2)   / Fix64.From(10);   // 0.2
-            RollingFriction = Fix64.From(1)   / Fix64.From(100);  // 0.01
-            SpinFriction    = Fix64.From(5)   / Fix64.From(100);  // 0.05
+            SlidingFriction = Fix64.From(25)   / Fix64.From(100);   // 0.2
+            RollingFriction = Fix64.From(2)   / Fix64.From(100);  // 0.01
+            SpinFriction    = Fix64.From(10)   / Fix64.From(100);  // 0.05
         }
 
         /// <summary>Convenience constructor using standard radius and mass.</summary>

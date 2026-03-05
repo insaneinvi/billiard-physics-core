@@ -39,14 +39,6 @@ namespace BilliardPhysics
         public static readonly Fix64 ApplyCueStrike_StrengthMax = Fix64.From(136);
 
         /// <summary>
-        /// Additional rolling-resistance coefficient contributed by the table cloth surface
-        /// (dimensionless).  Added to each ball's own <see cref="Ball.RollingFriction"/> and
-        /// <see cref="Ball.SlidingFriction"/> inside <see cref="MotionSimulator.Step"/>.
-        /// Zero means no extra table-cloth drag beyond the ball's own friction values.
-        /// </summary>
-        public static readonly Fix64 PhysicsWorld2D_TableFriction = Fix64.Zero;
-
-        /// <summary>
         /// Ball speed threshold below which a ball whose centre is inside
         /// a pocket's capture radius is considered pocketed (sunk).
         /// Balls faster than this value pass through the pocket mouth without being
@@ -64,5 +56,7 @@ namespace BilliardPhysics
         /// <see cref="PhysicsWorld2D.CheckPocketCaptures"/> call.
         /// </summary>
         public static readonly Fix64 PocketRimRestitution = Fix64.FromFloat(0.02f, 4);
+
+        public static readonly Fix64 SpinParam = Fix64.FromFloat(0.1f);
     }
 }

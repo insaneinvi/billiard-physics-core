@@ -23,8 +23,8 @@ public class CueController : MonoBehaviour,
     private Vector2 _pressLocalPoint;
     private float _pressStartDelta;
 
-    private Action<float> _onPullDeltaChanged;      // 下拉回调
-    private Action<float> _onReturnDeltaChanged;    // 回弹回调
+    public event Action<float> onPullDeltaChanged;      // 下拉回调
+    public event Action<float,bool> onReturnDeltaChanged;    // 回弹回调
 
     #region Unity
 
@@ -53,12 +53,12 @@ public class CueController : MonoBehaviour,
             UpdateCuePosition();
 
             // 回弹回调
-            _onReturnDeltaChanged?.Invoke(-_currentDeltaY);
+            onReturnDeltaChanged?.Invoke(-_currentDeltaY/maxPullDistance, false);
 
             // 回弹完成
             if (Mathf.Approximately(_currentDeltaY, 0))
             {
-                _onReturnDeltaChanged?.Invoke(0f);
+                onReturnDeltaChanged?.Invoke(0f, true);
             }
         }
     }
@@ -104,17 +104,15 @@ public class CueController : MonoBehaviour,
         // 最大下拉限制
         newDelta = Mathf.Max(newDelta, -maxPullDistance);
 
-        _currentDeltaY = newDelta;
+        _currentDeltaY =newDelta;
 
         UpdateCuePosition();
-
-        // 下拉回调（正值）
+        onPullDeltaChanged?.Invoke(-_currentDeltaY/maxPullDistance);
     }
 
     public void OnPointerUp(PointerEventData eventData)
     {
         _isDragging = false;
-        _onPullDeltaChanged?.Invoke(-_currentDeltaY);
     }
 
     #endregion
@@ -144,23 +142,5 @@ public class CueController : MonoBehaviour,
             UpdateCuePosition();
         }
     }
-
-    /// <summary>
-    /// 注册下拉过程回调（返回正值）
-    /// </summary>
-    public void RegisterPullListener(Action<float> action)
-    {
-        _onPullDeltaChanged = action;
-    }
-
-    /// <summary>
-    /// 注册回弹过程回调（返回正值）
-    /// delta == 0 表示回弹完成
-    /// </summary>
-    public void RegisterReturnListener(Action<float> action)
-    {
-        _onReturnDeltaChanged = action;
-    }
-
     #endregion
 }

@@ -13,8 +13,12 @@ public class BilliardWorld : MonoBehaviour
     
     public GameObject tempBall;
     public GameObject tempShadow;
-
-    public AimController aimRenderer;
+    
+    public DirFineAdjustment dirFineAdjustment;
+    public CueBallSpinSelector cueBallSpinSelector;
+    public CueController cueController;
+    
+    public AimController aimController;
     
     private Texture[] ballTextures;
     // Start is called before the first frame update
@@ -27,32 +31,116 @@ public class BilliardWorld : MonoBehaviour
     private Vector3 playerTouchPoint;
     private Vector3 aimPoint;
     private bool isAllBallMotionless = false;
+    private Fix64 hitStrength = 0;
+    private Fix64 spinX = 0;
+    private Fix64 spinY = 0;
     
     private bool isDragging = false;
     void Start()
     {
-        var originRack = BallRackHelper.GenerateRack();
-        var rackResult = BallRackHelper.ConvertRackToRotated(originRack);
-        InitPhysicsWorldAndBall(rackResult);
-        InitViewWorld(rackResult);
-        InitAimData();
-        aimRenderer.BindPhysicsWorld(_physicsWorld);
         var stepInterval = 1 / 60f;
         Time.fixedDeltaTime = stepInterval;
+        var originRack = BallRackHelper.GenerateRack();
+        var rackResult = BallRackHelper.ConvertRackToRotated(originRack);
         
+        InitPhysicsWorldAndBall(rackResult);
+        aimController.BindPhysicsWorld(_physicsWorld);
+        
+        InitViewWorld(rackResult);
+        InitAimData();
+        InitActionController();
+        UpdateCueState(true);
+
+        // DebugGraphy();
+    }
+    private void DebugGraphy()
+    {
         var debug = new PhysicsWorld2DDebug();
         debug.SetTableGeometry(_physicsWorld.TableSegments, _physicsWorld.Pockets);
         debug.SetBalls(_physicsWorld.Balls);
         debug.SetDebug(true);
-        pDebug = debug;
+        pDebug = debug; 
+    }
+
+    private void ClearDebugGraphy()
+    {
+        pDebug.Dispose();
     }
 
     private PhysicsWorld2DDebug pDebug;
     private void OnDestroy()
     {
-        pDebug.Dispose();
+        // ClearDebugGraphy();
+        dirFineAdjustment.OnDeltaValue -= OnDirFineAdjustment;
+        cueController.onPullDeltaChanged -= cuePullDeltaChanged;
+        cueController.onReturnDeltaChanged -= cueReturnDeltaChange;
+        cueBallSpinSelector.onSpinChanged -= cueBallSpinHandler;
     }
 
+    private void InitActionController()
+    {
+        dirFineAdjustment.OnDeltaValue += OnDirFineAdjustment;
+        cueController.onPullDeltaChanged += cuePullDeltaChanged;
+        cueController.onReturnDeltaChanged += cueReturnDeltaChange;
+        cueBallSpinSelector.onSpinChanged += cueBallSpinHandler;
+    }
+
+    private void cueBallSpinHandler(Vector2 delta)
+    {
+        spinX = -BilliardsPhysicsDefaults.SpinParam * Fix64.FromFloat(delta.x);
+        spinY = BilliardsPhysicsDefaults.SpinParam * Fix64.FromFloat(delta.y);
+    }
+    private void cuePullDeltaChanged(float delta)
+    {
+        aimController.UpdateCueHitPosition(delta);
+        if (delta != 0)
+        {
+            hitStrength = BilliardsPhysicsDefaults.ApplyCueStrike_StrengthMax * Fix64.FromFloat(delta);
+            if (hitStrength < BilliardsPhysicsDefaults.ApplyCueStrike_StrengthMin)
+            {
+                hitStrength = BilliardsPhysicsDefaults.ApplyCueStrike_StrengthMin;
+            }
+        }
+        else
+        {
+            hitStrength = Fix64.Zero;
+        }
+        
+    }
+
+    private void cueReturnDeltaChange(float delta, bool isEnd)
+    {
+        aimController.UpdateCueHitPosition(delta);
+        if (isEnd)
+        {
+            OnShoot();
+            UpdateCueState(false);
+        }
+    }
+
+    private void ResetHitInfo()
+    {
+        cueBallSpinSelector.ResetSpin();
+        hitStrength = 0;
+        spinX = 0;
+        spinY = 0;
+    }
+
+    private void UpdateCueState(bool state)
+    {
+        if (state)
+        {
+            ResetHitInfo();
+        }
+        cueController.SetCanPull(state);
+        aimController.SetPlayerAimState(state);
+    }
+    
+    private void OnDirFineAdjustment(float deltaValue)
+    {
+        aimController.AdjustCueDir(deltaValue);
+    }
+    
     private void InitViewWorld(RackResult rackResult)
     {
         ballDict = new();
@@ -128,10 +216,10 @@ public class BilliardWorld : MonoBehaviour
         var cueBall = _physicsWorld.Balls[0];
         var cueBallPos = new Vector3(cueBall.Position.X.ToFloat(), cueBall.Position.Y.ToFloat(), 0);
         aimPoint = new Vector3(0, 1, cueBallPos.z);
-        aimRenderer.UpdateAimPoint(aimPoint);
+        aimController.UpdateAimPoint(aimPoint);
     }
 
-    private void RayTouchPoint()
+    private bool RayTouchPoint()
     {
         Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
         RaycastHit hit;
@@ -140,8 +228,11 @@ public class BilliardWorld : MonoBehaviour
             if (hit.collider.CompareTag("Table"))
             {
                 aimPoint =  hit.point;
+                return true;
             }
         }
+
+        return false;
     }
     private void Update()
     {
@@ -151,19 +242,22 @@ public class BilliardWorld : MonoBehaviour
             {
                 return;
             }
-            isDragging = true;
+            isDragging = RayTouchPoint();
+            aimController.UpdateAimPoint(aimPoint);
         }
-
-        if (isDragging && Input.GetMouseButton(0))
+        else
         {
-            RayTouchPoint();
-            aimRenderer.UpdateAimPoint(aimPoint);
-        }
+            if (isDragging && Input.GetMouseButton(0))
+            {
+                RayTouchPoint();
+                aimController.UpdateAimPoint(aimPoint);
+            }
 
-        if (isDragging && Input.GetMouseButtonUp(0))
-        {
-            isDragging = false;
-        }
+            if (isDragging && Input.GetMouseButtonUp(0))
+            {
+                isDragging = false;
+            }
+        }         
     }
 
     private void FixedUpdate()
@@ -174,12 +268,12 @@ public class BilliardWorld : MonoBehaviour
             
         }
         var cbml =  IsAllBallMotionless();
-        if (isAllBallMotionless && !cbml)
+        if (!isAllBallMotionless && cbml)
         {
             UpdateAllBallsPositionInfo();
+            UpdateCueState(true);
         }
         isAllBallMotionless = cbml;
-        aimRenderer.SetPlayerAimState(isAllBallMotionless);
         if(!isAllBallMotionless)
             UpdateAllBallsPositionInfo();
     }
@@ -217,8 +311,7 @@ public class BilliardWorld : MonoBehaviour
     public void OnShoot()
     {
         if (!isAllBallMotionless) return;
-        FixVec2 direction = new FixVec2(Fix64.FromFloat(aimRenderer.cueDir.x), Fix64.FromFloat(aimRenderer.cueDir.y)).Normalized;
-        Fix64 strength = Fix64.From(80);
-        _physicsWorld.ApplyCueStrike(cueBall, direction, strength, Fix64.Zero,Fix64.Zero);
+        FixVec2 direction = new FixVec2(Fix64.FromFloat(aimController.cueDir.x), Fix64.FromFloat(aimController.cueDir.y)).Normalized;
+        _physicsWorld.ApplyCueStrike(cueBall, direction, hitStrength, spinX, spinY);
     }
 }
