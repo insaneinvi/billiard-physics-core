@@ -78,6 +78,11 @@ public class BilliardWorld : MonoBehaviour
         cueController.onPullDeltaChanged -= cuePullDeltaChanged;
         cueController.onReturnDeltaChanged -= cueReturnDeltaChange;
         cueBallSpinSelector.onSpinChanged -= cueBallSpinHandler;
+        if (ballDropController != null)
+        {
+            ballDropController.OnBallAnimationUpdate -= OnBallAnimationUpdateHandler;
+            ballDropController.OnBallHide -= OnBallHideHandler;
+        }
     }
 
     private void InitActionController()
@@ -86,6 +91,11 @@ public class BilliardWorld : MonoBehaviour
         cueController.onPullDeltaChanged += cuePullDeltaChanged;
         cueController.onReturnDeltaChanged += cueReturnDeltaChange;
         cueBallSpinSelector.onSpinChanged += cueBallSpinHandler;
+
+        // Register BallDropController presentation callbacks so the controller can
+        // drive position/scale/rotation updates without holding Transform references.
+        ballDropController.OnBallAnimationUpdate += OnBallAnimationUpdateHandler;
+        ballDropController.OnBallHide += OnBallHideHandler;
     }
 
     private void cueBallSpinHandler(Vector2 delta)
@@ -317,13 +327,57 @@ public class BilliardWorld : MonoBehaviour
 
     private void OnBallPocketedHandler(int pocketId,int ballId)
     {
-        var ball = _physicsWorld.Balls[ballId];
-        var pocket = _physicsWorld.Pockets[pocketId];
-        // ballDropController.OnBallPocketed(
-        //     ball,
-        //     ballDict[ball.Id].transform,
-        //     ballDict[ball.Id].GetComponent<Renderer>(),
-        //     new Vector3(pocket.Center.X.ToFloat(), pocket.Center.Y.ToFloat(),0),
-        //     tableConfig.PostPocketRollPath);
+        _stepPocketBalls.Add(ballId);
+
+        // Find the Ball object and the nearest pocket, then trigger the drop animation.
+        Ball ball = null;
+        foreach (var b in _physicsWorld.Balls)
+        {
+            if (b.Id == ballId) { ball = b; break; }
+        }
+        if (ball == null) return;
+
+        // Find the pocket whose centre is closest to the ball's current physics position.
+        Vector3 pocketWorldPos = Vector3.zero;
+        float   minDist        = float.MaxValue;
+        foreach (var pocket in _physicsWorld.Pockets)
+        {
+            float dx   = ball.Position.X.ToFloat() - pocket.Center.X.ToFloat();
+            float dy   = ball.Position.Y.ToFloat() - pocket.Center.Y.ToFloat();
+            float dist = dx * dx + dy * dy;
+            if (dist < minDist)
+            {
+                minDist = dist;
+                pocketWorldPos = new Vector3(
+                    pocket.Center.X.ToFloat(),
+                    pocket.Center.Y.ToFloat(),
+                    -BallRackHelper.HalfBallDiameter);
+            }
+        }
+
+        // Start the pocket-drop animation.  Pass null for rollPath — no post-pocket path
+        // is configured in this scene; the ball will be hidden when the drop finishes.
+        ballDropController.OnBallPocketed(ball, pocketWorldPos, null);
+    }
+
+    /// <summary>
+    /// Receives per-frame animation state from <see cref="BallDropController"/> and applies
+    /// position, scale, and rotation to the ball's view <c>GameObject</c>.
+    /// </summary>
+    private void OnBallAnimationUpdateHandler(int ballId, Vector3 worldPos, float scale, Quaternion rotation)
+    {
+        if (!ballDict.TryGetValue(ballId, out GameObject ballObj)) return;
+        ballObj.transform.SetPositionAndRotation(worldPos, rotation);
+        ballObj.transform.localScale = Vector3.one * scale;
+    }
+
+    /// <summary>
+    /// Called by <see cref="BallDropController"/> when a ball's animation has fully
+    /// completed and the ball should be hidden.
+    /// </summary>
+    private void OnBallHideHandler(int ballId)
+    {
+        if (ballDict.TryGetValue(ballId, out GameObject ballObj))
+            ballObj.SetActive(false);
     }
 }
