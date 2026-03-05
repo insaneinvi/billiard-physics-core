@@ -361,7 +361,10 @@ public class BilliardWorld : MonoBehaviour
 
         // Start the pocket-drop animation.  Pass null for rollPath — no post-pocket path
         // is configured in this scene; the ball will be hidden when the drop finishes.
-        ballDropController.OnBallPocketed(ball, pocketWorldPos, null);
+        // Pass the ball's current visual rotation so the animation continues seamlessly.
+        Quaternion entryRotation = _ballRotations.TryGetValue(ballId, out Quaternion rot)
+            ? rot : Quaternion.identity;
+        ballDropController.OnBallPocketed(ball, pocketWorldPos, null, entryRotation);
     }
 
     /// <summary>

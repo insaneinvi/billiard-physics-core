@@ -45,10 +45,16 @@ internal sealed class ActiveDrop
     public PocketDropAniHelper Helper;
     /// <summary>
     /// Current visual rotation, integrated each frame from the ball's entry
-    /// <see cref="Ball.AngularVelocity"/> via
+    /// <see cref="Ball.LastAngularVelocity"/> via
     /// <see cref="PhysicsToView.IntegrateRotation"/>.
     /// </summary>
     public Quaternion       Rotation;
+    /// <summary>
+    /// Physics-space angular velocity (rad/s) at the pocketing moment, taken from
+    /// <see cref="Ball.LastAngularVelocity"/>.  Gradually decays during the drop
+    /// animation to simulate the ball slowing to a stop.
+    /// </summary>
+    public Vector3          EntryAngularVelocity;
     /// <summary>Post-pocket roll path (from <c>TableConfig.PostPocketRollPath</c>).</summary>
     public SegmentData      RollPath;
     /// <summary>
@@ -166,7 +172,7 @@ public class BallDropController : MonoBehaviour
     /// <summary>
     /// Call when the physics layer reports that a single ball has been pocketed.
     /// Reads <see cref="Ball.Position"/>, <see cref="Ball.LinearVelocity"/>, and
-    /// <see cref="Ball.AngularVelocity"/> at the pocketing moment as the authoritative
+    /// <see cref="Ball.LastAngularVelocity"/> at the pocketing moment as the authoritative
     /// data for starting the animation.
     ///
     /// <para>Each frame the animation runs, <see cref="OnBallAnimationUpdate"/> is invoked
@@ -181,9 +187,16 @@ public class BallDropController : MonoBehaviour
     /// Pass <c>null</c> or a path where <c>Start == End</c> with no
     /// <c>ConnectionPoints</c> to skip the roll phase.
     /// </param>
-    public void OnBallPocketed(Ball ball, Vector3 pocketWorldPos, SegmentData rollPath)
+    /// <param name="entryRotation">
+    /// Visual rotation of the ball's GameObject at the pocketing moment.
+    /// Pass the value stored in the view-layer rotation dictionary so the drop
+    /// animation continues smoothly from the ball's last rendered orientation.
+    /// Pass <c>null</c> (default) to start from <see cref="Quaternion.identity"/>.
+    /// </param>
+    public void OnBallPocketed(Ball ball, Vector3 pocketWorldPos, SegmentData rollPath,
+                               Quaternion? entryRotation = null)
     {
-        StartOneDrop(ball, pocketWorldPos, rollPath);
+        StartOneDrop(ball, pocketWorldPos, rollPath, entryRotation);
     }
 
     /// <summary>
@@ -192,10 +205,10 @@ public class BallDropController : MonoBehaviour
     /// animations do not interfere with each other.
     /// </summary>
     public void OnBallsPocketed(
-        IReadOnlyList<(Ball ball, Vector3 pocketWorldPos, SegmentData rollPath)> drops)
+        IReadOnlyList<(Ball ball, Vector3 pocketWorldPos, SegmentData rollPath, Quaternion? entryRotation)> drops)
     {
-        foreach (var (ball, pocketWorldPos, rollPath) in drops)
-            StartOneDrop(ball, pocketWorldPos, rollPath);
+        foreach (var (ball, pocketWorldPos, rollPath, entryRotation) in drops)
+            StartOneDrop(ball, pocketWorldPos, rollPath, entryRotation);
     }
 
     /// <summary>
@@ -215,7 +228,8 @@ public class BallDropController : MonoBehaviour
 
     // ── Internal: start one drop animation ───────────────────────────────────
 
-    private void StartOneDrop(Ball ball, Vector3 pocketWorldPos, SegmentData rollPath)
+    private void StartOneDrop(Ball ball, Vector3 pocketWorldPos, SegmentData rollPath,
+                              Quaternion? entryRotation = null)
     {
         // Read the authoritative position from the physics model.
         // Z is taken from pocketWorldPos so the animation stays in the correct plane.
@@ -247,16 +261,30 @@ public class BallDropController : MonoBehaviour
             targetScale         = 0.75f,
         });
 
+        // Capture the angular velocity recorded just before pocketing so the drop
+        // animation can spin the ball naturally, then decay it toward zero.
+        Vector3 entryOmega = new Vector3(
+            ball.LastAngularVelocity.X.ToFloat(),
+            ball.LastAngularVelocity.Y.ToFloat(),
+            ball.LastAngularVelocity.Z.ToFloat());
+
         _activeDrops.Add(new ActiveDrop
         {
-            BallData       = ball,
-            Helper         = helper,
-            // Start from identity rotation; no transform reference available at pocketing time.
-            Rotation       = Quaternion.identity,
-            RollPath       = rollPath,
-            PocketWorldPos = pocketWorldPos,
+            BallData             = ball,
+            Helper               = helper,
+            // Preserve the ball's last rendered orientation so the drop animation
+            // continues smoothly from where the physics simulation left off.
+            Rotation             = entryRotation ?? Quaternion.identity,
+            EntryAngularVelocity = entryOmega,
+            RollPath             = rollPath,
+            PocketWorldPos       = pocketWorldPos,
         });
     }
+
+    // Exponential decay rate for drop-phase spin (s⁻¹).
+    // At this rate spin halves approximately every 0.17 s, fading naturally over the
+    // full 0.25 s drop animation so the ball visibly slows as it enters the pocket.
+    private const float DropSpinDecay = 4f;
 
     // ── Internal: drive active drop animations ────────────────────────────────
 
@@ -267,14 +295,15 @@ public class BallDropController : MonoBehaviour
             ActiveDrop      drop  = _activeDrops[i];
             PocketDropState state = drop.Helper.Update(deltaTime);
 
-            // Integrate visual rotation from the ball's entry angular velocity.
+            // Decay the entry angular velocity toward zero to simulate the ball
+            // gradually slowing as it drops into the pocket.
+            drop.EntryAngularVelocity *= Mathf.Exp(-DropSpinDecay * deltaTime);
+
+            // Integrate visual rotation from the decaying entry angular velocity.
             // PhysicsToView.IntegrateRotation applies the correct axial-vector
             // coordinate transform (physics Z-up → view −Z).
-            Vector3 physOmega = new Vector3(
-                drop.BallData.AngularVelocity.X.ToFloat(),
-                drop.BallData.AngularVelocity.Y.ToFloat(),
-                drop.BallData.AngularVelocity.Z.ToFloat());
-            drop.Rotation = PhysicsToView.IntegrateRotation(drop.Rotation, physOmega, deltaTime);
+            drop.Rotation = PhysicsToView.IntegrateRotation(
+                drop.Rotation, drop.EntryAngularVelocity, deltaTime);
 
             // Notify the presentation layer: position, scale, and rotation for this frame.
             // The caller (e.g. BilliardWorld) uses ball.Id to look up the view GameObject
