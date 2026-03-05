@@ -249,16 +249,18 @@ public class BallDropController : MonoBehaviour
         // Ball diameter in Unity world units (same coordinate system as pocketWorldPos).
         float ballDiameter = BallRackHelper.HalfBallDiameter * 2f;
 
-        // The Attract-phase endpoint: one ball-diameter from startPos toward the pocket.
-        // The ball moves just far enough to visually enter the pocket opening; the
-        // remaining lateral travel (if any) happens during the Sink phase.
+        // The Attract-phase endpoint: one ball-diameter from startPos toward the pocket,
+        // or pocketWorldPos itself when the pocket is closer than one ball-diameter.
+        // This prevents the visual target from ever overshooting the pocket center.
         Vector3 dropTarget = PocketDropAniHelper.CalcDropTarget(startPos, pocketWorldPos, ballDiameter);
 
-        // Duration scales with the ball's speed so faster-moving balls animate quickly
-        // and slower-moving balls animate proportionally slower, preserving the visual
-        // sense of speed.  CalcDropMoveTime clamps to [0.05 s, 1.0 s] for safety.
-        float ballLinearSpeed = entryLinearVelocity.magnitude;
-        float moveTime        = PocketDropAniHelper.CalcDropMoveTime(ballDiameter, ballLinearSpeed);
+        // Duration scales with the ball's actual travel distance (start → dropTarget) and
+        // speed, so the visual pace matches the ball's physical motion.
+        // When the pocket is very close, dropTarget == pocketWorldPos and the distance is
+        // shorter than a full ball-diameter; the duration shrinks accordingly.
+        float ballLinearSpeed    = entryLinearVelocity.magnitude;
+        float actualDropDistance = Vector3.Distance(dropTarget, startPos);
+        float moveTime           = PocketDropAniHelper.CalcDropMoveTime(actualDropDistance, ballLinearSpeed);
 
         // Obtain a helper from the pool and start the drop animation.
         PocketDropAniHelper helper = _pool.Rent();
