@@ -15,6 +15,12 @@ namespace BilliardPhysics
         /// Z component is side-spin (english); decays via SpinFriction.
         /// </summary>
         public FixVec3    AngularVelocity;
+        /// <summary>
+        /// Angular velocity (rad/s) captured at the moment the ball was pocketed,
+        /// before <see cref="AngularVelocity"/> is zeroed.
+        /// Read by the drop animation to continue spinning the ball naturally.
+        /// </summary>
+        public FixVec3    LastAngularVelocity;
         public bool       IsMotionless;
         public bool       IsPocketed;
 
