@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using BilliardPhysics;
 using BilliardPhysics.AniHelp;
+using BilliardPhysics.Runtime.BallInfo;
 using BilliardPhysics.Runtime.ViewTool;
 using UnityEngine;
 using Random = UnityEngine.Random;

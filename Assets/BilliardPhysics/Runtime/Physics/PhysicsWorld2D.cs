@@ -223,10 +223,10 @@ namespace BilliardPhysics
                     if (speed >= BilliardsPhysicsDefaults.PocketSinkSpeedThreshold) continue;
 
                     ball.LastAngularVelocity = ball.AngularVelocity;
+                    OnBallPocketed?.Invoke(pocket.Id, ball.Id);
                     ball.IsPocketed          = true;
                     ball.LinearVelocity      = FixVec2.Zero;
                     ball.AngularVelocity     = FixVec3.Zero;
-                    OnBallPocketed?.Invoke(pocket.Id, ball.Id);
                     break;
                 }
             }
