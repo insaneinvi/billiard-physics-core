@@ -133,6 +133,22 @@ namespace BilliardPhysics.AniHelp
         /// Values ≤ 0 use the default (0.75).
         /// </summary>
         public float targetScale;
+
+        /// <summary>
+        /// Explicit world-space end position of the Attract phase (where the ball arrives
+        /// before transitioning to the Sink phase).  Only the XY components are used;
+        /// the Z component is always inherited from <see cref="startPos"/>.
+        ///
+        /// <para>When this is the zero vector, the Attract phase ends at the pocket XY
+        /// (<see cref="pocketPos"/>) — the original behaviour.</para>
+        ///
+        /// <para>Compute using <see cref="PocketDropAniHelper.CalcDropTarget"/>:
+        /// <code>
+        /// dropTarget = PocketDropAniHelper.CalcDropTarget(dropStartPos, pocketWorldPos, ballDiameter);
+        /// </code>
+        /// </para>
+        /// </summary>
+        public Vector3 dropTarget;
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -168,6 +184,10 @@ namespace BilliardPhysics.AniHelp
         private const float DefaultVanishRatio     = 0.20f;
         private const float DefaultAttractStrength = 0.25f;
         private const float DefaultTargetScale     = 0.75f;
+
+        // Shared threshold for treating a vector's squared magnitude as zero.
+        // Used both in StartDrop (dropTarget sentinel check) and CalcDropTarget.
+        private const float ZeroVectorThreshold = 1e-6f;
 
         // ── Baked animation parameters (set once on StartDrop) ────────────────────
         private Vector3 _startPos;
@@ -263,9 +283,19 @@ namespace BilliardPhysics.AniHelp
             }
             _attractCtrl = req.startPos + velDir * (dist * attractStrength);
 
-            // Sink starts at the pocket XY, same Z as the ball (i.e. on the table surface),
-            // and descends to pocketPos.Z (the bottom of the pocket opening).
-            _sinkStart = new Vector3(req.pocketPos.x, req.pocketPos.y, req.startPos.z);
+            // Determine the Attract-phase endpoint (XY plane, same Z as startPos).
+            // If an explicit dropTarget is provided, the ball stops there at the end of
+            // the Attract phase before beginning the Sink descent.  This lets callers
+            // limit the lateral travel to one ball-diameter toward the pocket center
+            // (see CalcDropTarget).  When dropTarget is the zero vector, the original
+            // behaviour is preserved: the ball travels all the way to the pocket XY.
+            Vector3 attractEndXY = req.dropTarget.sqrMagnitude > ZeroVectorThreshold
+                ? req.dropTarget
+                : req.pocketPos;
+
+            // Sink starts at the Attract endpoint (at table-surface Z) and descends
+            // to pocketPos (full pocket depth).
+            _sinkStart = new Vector3(attractEndXY.x, attractEndXY.y, req.startPos.z);
 
             // ── Reset playback ──
             _elapsed = 0f;
@@ -321,6 +351,62 @@ namespace BilliardPhysics.AniHelp
             _running = false;
         }
 
+        // ── Static utility: drop-target and move-time helpers ─────────────────
+
+        /// <summary>
+        /// Computes the Attract-phase end position for the drop animation.
+        ///
+        /// <para>The ball moves from <paramref name="dropStartPos"/> one
+        /// <paramref name="ballDiameter"/> toward <paramref name="pocketWorldPos"/>, so it
+        /// travels just far enough to visually enter the pocket opening without overshooting
+        /// all the way to the pocket center in a single frame-locked step:</para>
+        /// <code>
+        /// result = dropStartPos + (pocketWorldPos − dropStartPos).normalized × ballDiameter
+        /// </code>
+        /// <para>Pass the result as <see cref="PocketDropRequest.dropTarget"/> before
+        /// calling <see cref="StartDrop"/>.</para>
+        /// </summary>
+        /// <param name="dropStartPos">Ball world position at the pocketing moment.</param>
+        /// <param name="pocketWorldPos">World-space centre of the pocket.</param>
+        /// <param name="ballDiameter">Ball diameter in the same world units (e.g. 0.5715).</param>
+        /// <returns>The target position one <paramref name="ballDiameter"/> toward the pocket.</returns>
+        public static Vector3 CalcDropTarget(
+            Vector3 dropStartPos, Vector3 pocketWorldPos, float ballDiameter)
+        {
+            Vector3 dir = pocketWorldPos - dropStartPos;
+            // Guard against degenerate case where start == pocket.
+            if (dir.sqrMagnitude < ZeroVectorThreshold)
+                return dropStartPos;
+            return dropStartPos + dir.normalized * ballDiameter;
+        }
+
+        /// <summary>
+        /// Computes the total drop-animation duration from the ball's linear speed at the
+        /// moment of pocketing:
+        /// <code>
+        /// moveTime = ballDiameter / ballLinearSpeed
+        /// </code>
+        /// <para>This ensures faster-moving balls complete the drop animation quickly while
+        /// slower balls take proportionally longer, preserving the visual sense of speed.</para>
+        /// <para>The result is clamped to [<paramref name="minDuration"/>,
+        /// <paramref name="maxDuration"/>] to avoid excessively long or imperceptibly short
+        /// animations when the ball speed is near zero or extremely high.</para>
+        /// </summary>
+        /// <param name="ballDiameter">Ball diameter in world units.</param>
+        /// <param name="ballLinearSpeed">Ball linear speed (world units/s) at pocketing.</param>
+        /// <param name="minDuration">Minimum allowed duration (default 0.05 s).</param>
+        /// <param name="maxDuration">Maximum allowed duration (default 1.0 s).</param>
+        /// <returns>Clamped animation duration in seconds.</returns>
+        public static float CalcDropMoveTime(
+            float ballDiameter, float ballLinearSpeed,
+            float minDuration = 0.05f, float maxDuration = 1.0f)
+        {
+            // Guard against near-zero speed to prevent division by zero or huge durations.
+            if (ballLinearSpeed < 1e-4f)
+                return minDuration;
+            return Mathf.Clamp(ballDiameter / ballLinearSpeed, minDuration, maxDuration);
+        }
+
         // ── Private: evaluate state at an absolute time ───────────────────────────
 
         private PocketDropState EvaluateAt(float time)
@@ -347,17 +433,17 @@ namespace BilliardPhysics.AniHelp
             if (time < _attractEnd)
             {
                 // ── Attract phase ───────────────────────────────────────────────
-                // Quadratic Bézier from startPos → _attractCtrl → pocketXY (EaseOut)
+                // Quadratic Bézier from startPos → _attractCtrl → _sinkStart (EaseOut).
+                // _sinkStart is the Attract endpoint (pocket XY or explicit dropTarget XY,
+                // at the table-surface Z).  Using _sinkStart here keeps the Attract
+                // endpoint consistent with the start of the following Sink phase.
                 float phaseT = _attractEnd > 0f ? time / _attractEnd : 1f;
                 float easeT  = 1f - (1f - phaseT) * (1f - phaseT);  // EaseOut quadratic
 
-                // Bézier endpoint: pocket XY but same Z as startPos
-                // (the ball hasn't started sinking yet)
-                Vector3 attractEnd = new Vector3(_pocketPos.x, _pocketPos.y, _startPos.z);
-                float   u          = 1f - easeT;
+                float   u = 1f - easeT;
                 pos  = u * u * _startPos
                      + 2f * u * easeT * _attractCtrl
-                     + easeT * easeT * attractEnd;
+                     + easeT * easeT * _sinkStart;
 
                 scale = 1f;   // scale unchanged during Attract
                 phase = PocketDropPhase.Attract;
