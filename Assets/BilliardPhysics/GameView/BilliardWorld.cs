@@ -17,8 +17,8 @@ public class BilliardWorld : MonoBehaviour
     public DirFineAdjustment dirFineAdjustment;
     public CueBallSpinSelector cueBallSpinSelector;
     public CueController cueController;
-    
     public AimController aimController;
+    public BallDropController ballDropController;
     
     private Texture[] ballTextures;
     // Start is called before the first frame update
