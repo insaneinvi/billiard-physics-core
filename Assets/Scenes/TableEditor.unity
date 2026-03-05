@@ -498,7 +498,7 @@ MonoBehaviour:
   cueBallSpinSelector: {fileID: 1764854433}
   cueController: {fileID: 896095132}
   aimController: {fileID: 612885783}
-  ballDropController: {fileID: 0}
+  ballDropController: {fileID: 957852301}
 --- !u!212 &305571195
 SpriteRenderer:
   m_ObjectHideFlags: 0
@@ -1159,7 +1159,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b5e8d3f2a1c47091bcdef2345678901a, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  RollSpeed: 0.5
+  RollSpeed: 6
 --- !u!4 &957852302
 Transform:
   m_ObjectHideFlags: 0

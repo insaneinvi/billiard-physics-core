@@ -74,5 +74,9 @@ namespace BilliardPhysics.Runtime.ViewTool
             Vector3 axis     = omega / omegaMag;
             return (Quaternion.AngleAxis(angleDeg, axis) * currentRotation).normalized;
         }
+        
+        public static Vector2 FixVec2ToVector2(FixVec2 vec2){
+            return new Vector2(vec2.X.ToFloat(), vec2.Y.ToFloat());
+        }
     }
 }

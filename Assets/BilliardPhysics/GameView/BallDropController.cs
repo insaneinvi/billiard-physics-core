@@ -4,6 +4,7 @@ using BilliardPhysics;
 using BilliardPhysics.AniHelp;
 using BilliardPhysics.Runtime.ViewTool;
 using UnityEngine;
+using Random = UnityEngine.Random;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Supporting types
@@ -125,7 +126,7 @@ public class BallDropController : MonoBehaviour
     /// </code>
     /// </para>
     /// </summary>
-    public Action<int, Vector3, float, Quaternion> OnBallAnimationUpdate;
+    public Action<int, Vector3, float, Quaternion, bool> OnBallAnimationUpdate;
 
     /// <summary>
     /// Called once when a ball's animation is fully complete and the ball should
@@ -145,6 +146,7 @@ public class BallDropController : MonoBehaviour
     [Tooltip("Speed at which pocketed balls roll along the post-pocket path (world units per second).")]
     public float RollSpeed = 0.5f;
 
+    public float originScale = 0.5715f;
     // ── Internal state ────────────────────────────────────────────────────────
 
     // Object pool: reuse PocketDropAniHelper instances to avoid per-pocket GC.
@@ -279,7 +281,7 @@ public class BallDropController : MonoBehaviour
             // Notify the presentation layer: position, scale, and rotation for this frame.
             // The caller (e.g. BilliardWorld) uses ball.Id to look up the view GameObject
             // and applies these values to its Transform.
-            OnBallAnimationUpdate?.Invoke(drop.BallData.Id, state.position, state.scale, drop.Rotation);
+            OnBallAnimationUpdate?.Invoke(drop.BallData.Id, state.position, state.scale, drop.Rotation, false);
 
             if (state.phase == PocketDropPhase.Finished)
             {
@@ -337,7 +339,7 @@ public class BallDropController : MonoBehaviour
         SetBallRollingVelocity(ball, waypoints, 0, RollSpeed);
 
         // Notify the presentation layer of the initial roll position (scale=1, full size).
-        OnBallAnimationUpdate?.Invoke(ball.Id, waypoints[0], 1f, startRotation);
+        OnBallAnimationUpdate?.Invoke(ball.Id, waypoints[0], 1f, startRotation, true);
 
         _activeRolls.Add(new ActiveRoll
         {
@@ -372,7 +374,7 @@ public class BallDropController : MonoBehaviour
                 roll.Rotation = PhysicsToView.IntegrateRotation(roll.Rotation, physOmega, deltaTime);
 
                 // Notify the presentation layer with the updated position and rotation.
-                OnBallAnimationUpdate?.Invoke(roll.BallData.Id, roll.CurrentPosition, 1f, roll.Rotation);
+                OnBallAnimationUpdate?.Invoke(roll.BallData.Id, roll.CurrentPosition, 1f, roll.Rotation, true);
             }
 
             if (stopped)

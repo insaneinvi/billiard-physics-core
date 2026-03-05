@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using BilliardPhysics;
 using BilliardPhysics.Runtime.BallInfo;
 using BilliardPhysics.Runtime.ViewTool;
@@ -38,6 +39,8 @@ public class BilliardWorld : MonoBehaviour
     private Fix64 spinY = 0;
     
     private bool isDragging = false;
+
+    private Vector3 ballOriginScale;
     void Start()
     {
         var stepInterval = 1 / 60f;
@@ -173,6 +176,9 @@ public class BilliardWorld : MonoBehaviour
         
         
         var cueBall = Instantiate(tempBall);
+
+        ballOriginScale = cueBall.transform.localScale;
+        
         cueBall.transform.position = rackResult.CueBall.Position;
         cueBall.GetComponent<Renderer>().material.SetTexture("_MainTex", ballTextures[rackResult.CueBall.Number]);
         
@@ -200,6 +206,12 @@ public class BilliardWorld : MonoBehaviour
     {
         var physicsData = Resources.Load<TextAsset>("Data/tb8v_m");
         var (tableSegments, pockets, rollPath) = TableAndPocketBinaryLoader.Load(physicsData);
+        dropBallRollPath = new()
+        {
+            Start = PhysicsToView.FixVec2ToVector2(rollPath.Start),
+            End = PhysicsToView.FixVec2ToVector2(rollPath.End),
+            ConnectionPoints = rollPath.ConnectionPoints.Select(point => PhysicsToView.FixVec2ToVector2(point)).ToList()
+        };
         _physicsWorld = new();
         _physicsWorld.OnBallPocketed += OnBallPocketedHandler;
         foreach (var tableSegment in tableSegments)
@@ -327,48 +339,26 @@ public class BilliardWorld : MonoBehaviour
 
     private void OnBallPocketedHandler(int pocketId,int ballId)
     {
-        _stepPocketBalls.Add(ballId);
-
-        // Find the Ball object and the nearest pocket, then trigger the drop animation.
-        Ball ball = null;
-        foreach (var b in _physicsWorld.Balls)
-        {
-            if (b.Id == ballId) { ball = b; break; }
-        }
-        if (ball == null) return;
-
-        // Find the pocket whose centre is closest to the ball's current physics position.
+        Ball ball = _physicsWorld.Balls[ballId];
         Vector3 pocketWorldPos = Vector3.zero;
-        float   minDist        = float.MaxValue;
-        foreach (var pocket in _physicsWorld.Pockets)
-        {
-            float dx   = ball.Position.X.ToFloat() - pocket.Center.X.ToFloat();
-            float dy   = ball.Position.Y.ToFloat() - pocket.Center.Y.ToFloat();
-            float dist = dx * dx + dy * dy;
-            if (dist < minDist)
-            {
-                minDist = dist;
-                pocketWorldPos = new Vector3(
-                    pocket.Center.X.ToFloat(),
-                    pocket.Center.Y.ToFloat(),
-                    -BallRackHelper.HalfBallDiameter);
-            }
-        }
-
-        // Start the pocket-drop animation.  Pass null for rollPath — no post-pocket path
-        // is configured in this scene; the ball will be hidden when the drop finishes.
-        ballDropController.OnBallPocketed(ball, pocketWorldPos, null);
+        var pocket = _physicsWorld.Pockets[pocketId];
+        pocketWorldPos.x = pocket.Center.X.ToFloat();
+        pocketWorldPos.y = pocket.Center.Y.ToFloat();   
+        ballDropController.OnBallPocketed(ball, pocketWorldPos, dropBallRollPath);
     }
 
     /// <summary>
     /// Receives per-frame animation state from <see cref="BallDropController"/> and applies
     /// position, scale, and rotation to the ball's view <c>GameObject</c>.
     /// </summary>
-    private void OnBallAnimationUpdateHandler(int ballId, Vector3 worldPos, float scale, Quaternion rotation)
+    private void OnBallAnimationUpdateHandler(int ballId, Vector3 worldPos, float scale, Quaternion rotation, bool isRolling)
     {
         if (!ballDict.TryGetValue(ballId, out GameObject ballObj)) return;
         ballObj.transform.SetPositionAndRotation(worldPos, rotation);
-        ballObj.transform.localScale = Vector3.one * scale;
+        ballObj.transform.localScale = ballOriginScale * scale;
+
+        if (!ballShadowDict.TryGetValue(ballId, out GameObject ballShadowObj)) return;
+        ballShadowObj.transform.position = worldPos;
     }
 
     /// <summary>
@@ -377,7 +367,6 @@ public class BilliardWorld : MonoBehaviour
     /// </summary>
     private void OnBallHideHandler(int ballId)
     {
-        if (ballDict.TryGetValue(ballId, out GameObject ballObj))
-            ballObj.SetActive(false);
+
     }
 }
