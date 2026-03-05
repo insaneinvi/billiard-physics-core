@@ -1625,5 +1625,191 @@ namespace BilliardPhysics.Tests
                 $"Velocity.X={ball.LinearVelocity.X.ToFloat():F1}, " +
                 $"Pocketed={ball.IsPocketed}");
         }
+
+        // ── spinX/spinY near-cushion regression ───────────────────────────────────
+
+        /// <summary>
+        /// Regression: <see cref="CCDSystem.SweptCircleSegment"/> must detect a cushion
+        /// face collision when the ball's surface is already penetrating the face
+        /// (0 &lt; dist &lt; ball.Radius, t &lt; 0 with the old formula) and the ball
+        /// is still approaching.
+        ///
+        /// Root cause: the old face-hit path computed t = (dist − R) / (−vn) and then
+        /// ran <c>if (t &lt; Fix64.Zero || t &gt; dt) continue</c>, silently skipping
+        /// the penetrating-ball case.  This allowed a ball that was nudged through a
+        /// cushion surface by a ball–ball positional correction to escape the table.
+        ///
+        /// Fix: clamp t to zero when it is negative so the collision is resolved
+        /// immediately, mirroring the already-overlapping guard in
+        /// <see cref="CCDSystem.SweptCircleCircle"/>.
+        /// </summary>
+        [Test]
+        public void SweptCircleSegment_BallSurfacePenetratingFace_Approaching_DetectsCollisionAtTOIZero()
+        {
+            // Vertical right-wall segment at x = 1, outward normal (−1, 0).
+            // Segment runs bottom → top so Direction = (0, 1), Normal = (−1, 0).
+            Fix64 wallX = Fix64.One;
+            var seg = new Segment(
+                new FixVec2(wallX, Fix64.From(-10)),
+                new FixVec2(wallX, Fix64.From( 10)));
+
+            var ball = new Ball(0);
+            // Place ball centre so its surface is 0.1 units inside the wall face:
+            //   dist = dot(ball.Position − segStart, n) = wallX − ball.Position.X
+            //        = 1 − (1 − ball.Radius + 0.1) = ball.Radius − 0.1  < ball.Radius.
+            Fix64 slop = Fix64.FromFloat(0.1f);
+            ball.Position       = new FixVec2(wallX - ball.Radius + slop, Fix64.Zero);
+            ball.LinearVelocity = new FixVec2(Fix64.From(100), Fix64.Zero);  // approaching
+
+            Fix64 dt = Fix64.One / Fix64.From(60);
+            bool hit = CCDSystem.SweptCircleSegment(ball, seg, dt,
+                out Fix64 toi, out FixVec2 hitNormal, out FixVec2 _);
+
+            Assert.IsTrue(hit,
+                "Ball surface already penetrating the wall face and approaching must be detected.");
+            Assert.AreEqual(Fix64.Zero, toi,
+                "TOI must be 0 when the ball surface is already inside the wall.");
+            Assert.IsTrue(hitNormal.X < Fix64.Zero,
+                $"Hit normal must point outward (−X) for this right-wall segment; got {hitNormal}.");
+        }
+
+        /// <summary>
+        /// Regression: <see cref="CCDSystem.SweptCircleSegment"/> must also detect a
+        /// cushion face collision when the ball's entire centre has crossed to the wrong
+        /// side of the wall (dist &lt; 0) and the ball is still approaching.
+        ///
+        /// This case can arise when a ball–ball positional correction pushes a ball that
+        /// is very close to a cushion past the wall surface altogether.  Previously the
+        /// guard <c>if (dist &lt; Fix64.Zero) continue</c> caused the face test to be
+        /// silently skipped, so the ball was never pushed back and escaped the table.
+        /// </summary>
+        [Test]
+        public void SweptCircleSegment_BallCentreInsideWall_Approaching_DetectsCollisionAtTOIZero()
+        {
+            // Same right-wall segment: x = 1, normal (−1, 0).
+            Fix64 wallX = Fix64.One;
+            var seg = new Segment(
+                new FixVec2(wallX, Fix64.From(-10)),
+                new FixVec2(wallX, Fix64.From( 10)));
+
+            var ball = new Ball(0);
+            // Place ball centre 0.1 units PAST the wall plane (dist < 0).
+            //   dist = 1 − 1.1 = −0.1 < 0.
+            ball.Position       = new FixVec2(wallX + Fix64.FromFloat(0.1f), Fix64.Zero);
+            ball.LinearVelocity = new FixVec2(Fix64.From(100), Fix64.Zero);  // moving deeper inside
+
+            Fix64 dt = Fix64.One / Fix64.From(60);
+            bool hit = CCDSystem.SweptCircleSegment(ball, seg, dt,
+                out Fix64 toi, out FixVec2 hitNormal, out FixVec2 _);
+
+            Assert.IsTrue(hit,
+                "Ball centre inside the wall and approaching must be detected as a collision.");
+            Assert.AreEqual(Fix64.Zero, toi,
+                "TOI must be 0 when the ball centre is already on the wrong side of the wall.");
+            Assert.IsTrue(hitNormal.X < Fix64.Zero,
+                $"Hit normal must point outward (−X); got {hitNormal}.");
+        }
+
+        /// <summary>
+        /// Integration regression: a ball whose surface is slightly inside a cushion
+        /// face and is still approaching must be reflected and pushed back to the outside
+        /// in a single <see cref="PhysicsWorld2D.Step"/> call.
+        ///
+        /// This exercises the combined fix: SweptCircleSegment detects the penetrating
+        /// face at toi = 0, and the new signed-distance push-out in PhysicsWorld2D
+        /// correctly pushes the ball outward regardless of which side the ball centre is on.
+        /// </summary>
+        [Test]
+        public void Step_BallSurfacePenetratingCushion_IsReflectedAndPushedBack()
+        {
+            Fix64 wallX = Fix64.From(2);
+            var seg = new Segment(
+                new FixVec2(wallX, Fix64.From(-10)),
+                new FixVec2(wallX, Fix64.From( 10)));
+
+            var world = new PhysicsWorld2D();
+            world.SetTableSegments(new[] { seg });
+
+            var ball = new Ball(0);
+            // Surface is 0.05 units inside the wall (dist = ball.Radius − 0.05 < ball.Radius).
+            Fix64 penetration = Fix64.FromFloat(0.05f);
+            ball.Position       = new FixVec2(wallX - ball.Radius + penetration, Fix64.Zero);
+            ball.LinearVelocity = new FixVec2(Fix64.From(100), Fix64.Zero);
+            world.AddBall(ball);
+
+            world.Step();
+
+            // Ball must have bounced back (negative X velocity) and must not be past the wall.
+            Assert.IsTrue(ball.LinearVelocity.X <= Fix64.Zero,
+                "Ball must rebound off the wall it was already penetrating.");
+            Assert.IsTrue(ball.Position.X <= wallX,
+                $"Ball must not have escaped through the wall: x={ball.Position.X.ToFloat():F4}, " +
+                $"wallX={wallX.ToFloat():F4}");
+        }
+
+        /// <summary>
+        /// Integration regression (spinX + spinY near cushion): when a cue ball with
+        /// side-spin and top-spin collides with a target ball that is very close to a
+        /// cushion, neither ball may escape through the cushion wall.
+        ///
+        /// Root cause: <see cref="ImpulseResolver.ResolveBallBall"/>'s positional
+        /// correction pushes the target ball toward the wall; when the target is
+        /// sufficiently close the correction can move it past the wall surface
+        /// (dist &lt; ball.Radius → t &lt; 0 in the face test → old code skips the
+        /// wall collision → ball escapes).
+        ///
+        /// The test deliberately places the two balls with a small overlap so the
+        /// positional correction fires and can push the target through the wall surface.
+        /// </summary>
+        [Test]
+        public void Step_CueBallWithSpinCollidesNearCushion_BallsRemainInsideTable()
+        {
+            // Right wall at x = 2, outward normal (−1, 0).
+            Fix64 wallX = Fix64.From(2);
+            var rightWall = new Segment(
+                new FixVec2(wallX, Fix64.From(-10)),
+                new FixVec2(wallX, Fix64.From( 10)));
+
+            var world = new PhysicsWorld2D();
+            world.SetTableSegments(new[] { rightWall });
+
+            // Target ball: surface is very close to the wall (0.05 units clearance).
+            Fix64 smallClearance = Fix64.FromFloat(0.05f);
+            var target = new Ball(1);
+            target.Position      = new FixVec2(wallX - target.Radius - smallClearance, Fix64.Zero);
+            target.LinearVelocity = FixVec2.Zero;
+
+            // Cue ball: positioned so it overlaps the target by ~0.5 units, which is
+            // larger than ImpulseResolver.PenetrationSlop (0.1), so the positional
+            // correction fires and pushes the target toward — and potentially past — the wall.
+            Fix64 twoR    = Ball.StandardRadius * Fix64.From(2);
+            Fix64 overlap = Fix64.FromFloat(0.5f);
+            var cue = new Ball(0);
+            cue.Position = new FixVec2(target.Position.X - twoR + overlap, Fix64.Zero);
+
+            // Strike with both spinX (side-spin) and spinY (top-spin) — the trigger
+            // condition described in the issue.
+            Fix64 strength = Fix64.From(50000);
+            Fix64 spinX    = Ball.StandardRadius / Fix64.From(3);
+            Fix64 spinY    = Ball.StandardRadius / Fix64.From(2);
+            CueStrike.Apply(cue, new FixVec2(Fix64.One, Fix64.Zero), strength, spinX, spinY);
+
+            world.AddBall(cue);
+            world.AddBall(target);
+
+            // Run several physics steps to let the collision be fully resolved.
+            for (int step = 0; step < 10; step++)
+                world.Step();
+
+            Fix64 tolerance = Fix64.FromFloat(0.5f);
+
+            // Neither ball may escape through the right wall.
+            Assert.IsTrue(cue.IsPocketed || cue.Position.X <= wallX - cue.Radius + tolerance,
+                $"Cue ball must not escape through the right wall: " +
+                $"x={cue.Position.X.ToFloat():F4}, limit={(wallX - cue.Radius).ToFloat():F4}");
+            Assert.IsTrue(target.IsPocketed || target.Position.X <= wallX - target.Radius + tolerance,
+                $"Target ball must not escape through the right wall: " +
+                $"x={target.Position.X.ToFloat():F4}, limit={(wallX - target.Radius).ToFloat():F4}");
+        }
     }
 }

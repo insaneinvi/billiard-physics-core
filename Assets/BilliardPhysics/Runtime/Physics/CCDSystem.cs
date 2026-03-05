@@ -213,10 +213,17 @@ namespace BilliardPhysics
                 if (vn >= Fix64.Zero) continue;  // moving away from or parallel to sub-segment
 
                 Fix64 dist = FixVec2.Dot(ball.Position - segStart, n);
-                if (dist < Fix64.Zero) continue;  // ball on wrong side
 
+                // Compute candidate TOI.  When dist ≤ ball.Radius the ball surface is
+                // already touching or inside the wall — this covers both the "surface
+                // penetrating" case (0 ≤ dist < ball.Radius, t < 0) and the "ball centre
+                // inside wall" case (dist < 0, t ≪ 0), which can arise when a ball–ball
+                // positional correction nudges a nearby ball through a cushion face.
+                // Clamp t to zero and resolve immediately, mirroring the analogous guard
+                // in SweptCircleCircle for already-overlapping balls.
                 Fix64 t = (dist - ball.Radius) / (-vn);
-                if (t < Fix64.Zero || t > dt) continue;
+                if (t < Fix64.Zero) t = Fix64.Zero;
+                if (t > dt) continue;
 
                 // Check if hit point falls within sub-segment extents.
                 FixVec2 hitPos = ball.Position + ball.LinearVelocity * t;
@@ -226,11 +233,17 @@ namespace BilliardPhysics
                 {
                     if (!bestHit || t < bestToi)
                     {
-                        bestHit      = true;
-                        bestToi      = t;
-                        bestNormal   = n;
-                        // Contact point on the cushion face: perpendicular foot from ball centre.
-                        bestHitPoint = hitPos - n * ball.Radius;
+                        bestHit    = true;
+                        bestToi    = t;
+                        bestNormal = n;
+                        // Contact point: foot of perpendicular from the ball centre onto the
+                        // wall plane.  distAtToi is the signed distance of the ball centre
+                        // from the plane at the collision moment; subtracting it along n from
+                        // hitPos places the contact point exactly on the wall surface for both
+                        // the normal case (t > 0, distAtToi ≈ ball.Radius) and the already-
+                        // penetrating case (t = 0, distAtToi = dist ≤ ball.Radius).
+                        Fix64 distAtToi = dist + vn * t;
+                        bestHitPoint = hitPos - n * distAtToi;
                     }
                 }
             }

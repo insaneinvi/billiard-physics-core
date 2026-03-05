@@ -167,17 +167,22 @@ namespace BilliardPhysics
                             ball.AngularVelocity.X = -ball.LinearVelocity.Y * invR;
                         }
 
-                        // Positional push-out: correct any interpenetration introduced by
-                        // fixed-point rounding when advancing the ball to the TOI position.
-                        // Without this the ball can remain slightly inside the cushion surface,
-                        // causing subsequent CCD steps to miss the contact and allow tunnelling.
-                        FixVec2 dp   = ball.Position - result.HitPoint;
-                        Fix64   dist = dp.Magnitude;
-                        if (dist < ball.Radius)
+                        // Positional push-out: ensure the ball centre sits at least
+                        // ball.Radius + PushOutSlop from the struck surface after the
+                        // impulse.  We use the signed projection of (ball.Position − HitPoint)
+                        // onto HitNormal to get a signed distance; if that signed distance is
+                        // less than ball.Radius + PushOutSlop we push outward by the deficit.
+                        // Using the signed projection (rather than an unsigned magnitude plus a
+                        // direction heuristic) correctly handles the case where the ball centre
+                        // has ended up on the wrong side of the wall — for example after a
+                        // ball–ball positional correction nudged a ball through a nearby cushion
+                        // — where the old formula would push the ball deeper into the wall.
+                        Fix64 signedDist = FixVec2.Dot(ball.Position - result.HitPoint,
+                                                       result.HitNormal);
+                        if (signedDist < ball.Radius + PushOutSlop)
                         {
-                            // Use dp.Normalized if non-degenerate; fall back to HitNormal.
-                            FixVec2 pushDir = dist > Fix64.Zero ? dp.Normalized : result.HitNormal;
-                            ball.Position += pushDir * (ball.Radius - dist + PushOutSlop);
+                            ball.Position += result.HitNormal
+                                           * (ball.Radius + PushOutSlop - signedDist);
                         }
                     }
                 }
