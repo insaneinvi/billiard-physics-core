@@ -163,5 +163,92 @@ namespace BilliardPhysics.Tests
             Assert.Less(omega.magnitude, initialOmega.magnitude * 0.5f,
                 "Spin must be reduced to less than half its initial magnitude by the end of the drop animation.");
         }
+
+        // ── CalcDropTarget utility ────────────────────────────────────────────────
+
+        /// <summary>
+        /// <see cref="PocketDropAniHelper.CalcDropTarget"/> must return a point exactly one
+        /// ball-diameter from <c>dropStartPos</c> in the direction of <c>pocketWorldPos</c>.
+        /// </summary>
+        [Test]
+        public void CalcDropTarget_ReturnsPointOneDiameterTowardPocket()
+        {
+            var   startPos      = new Vector3(0f, 0f, 0f);
+            var   pocketPos     = new Vector3(3f, 4f, 0f); // distance = 5
+            float ballDiameter  = 0.5715f;
+
+            Vector3 result = PocketDropAniHelper.CalcDropTarget(startPos, pocketPos, ballDiameter);
+
+            // Distance from startPos to result must equal ballDiameter.
+            float dist = Vector3.Distance(startPos, result);
+            Assert.AreEqual(ballDiameter, dist, 1e-5f,
+                "CalcDropTarget must place the result exactly one ballDiameter from startPos.");
+
+            // Result must lie on the straight line from startPos toward pocketPos.
+            Vector3 expected = startPos + (pocketPos - startPos).normalized * ballDiameter;
+            Assert.AreEqual(expected.x, result.x, 1e-5f, "X component must match.");
+            Assert.AreEqual(expected.y, result.y, 1e-5f, "Y component must match.");
+            Assert.AreEqual(expected.z, result.z, 1e-5f, "Z component must match.");
+        }
+
+        /// <summary>
+        /// When <c>dropStartPos</c> equals <c>pocketWorldPos</c> (degenerate case),
+        /// <see cref="PocketDropAniHelper.CalcDropTarget"/> must return <c>dropStartPos</c>
+        /// without throwing or producing NaN.
+        /// </summary>
+        [Test]
+        public void CalcDropTarget_WhenStartEqualsPocket_ReturnsStartPos()
+        {
+            var startPos = new Vector3(1f, 2f, 3f);
+            Vector3 result = PocketDropAniHelper.CalcDropTarget(startPos, startPos, 0.5715f);
+
+            Assert.AreEqual(startPos, result,
+                "Degenerate case (start == pocket) must return startPos unchanged.");
+        }
+
+        // ── CalcDropMoveTime utility ──────────────────────────────────────────────
+
+        /// <summary>
+        /// <see cref="PocketDropAniHelper.CalcDropMoveTime"/> must return
+        /// <c>ballDiameter / ballLinearSpeed</c> for normal speed values.
+        /// </summary>
+        [Test]
+        public void CalcDropMoveTime_NormalSpeed_ReturnsDiameterOverSpeed()
+        {
+            float diameter  = 0.5715f;
+            float speed     = 2.0f;
+
+            float result   = PocketDropAniHelper.CalcDropMoveTime(diameter, speed);
+            float expected = diameter / speed;
+
+            Assert.AreEqual(expected, result, 1e-5f,
+                "CalcDropMoveTime must equal ballDiameter / ballLinearSpeed for normal speeds.");
+        }
+
+        /// <summary>
+        /// When ball speed is near zero, <see cref="PocketDropAniHelper.CalcDropMoveTime"/>
+        /// must return the minimum duration rather than a huge or infinite value.
+        /// </summary>
+        [Test]
+        public void CalcDropMoveTime_NearZeroSpeed_ReturnsMinDuration()
+        {
+            float result = PocketDropAniHelper.CalcDropMoveTime(0.5715f, 0f);
+
+            Assert.AreEqual(0.05f, result, 1e-5f,
+                "Near-zero speed must produce the minimum duration (0.05 s).");
+        }
+
+        /// <summary>
+        /// When the computed duration would exceed the maximum, the result must be clamped.
+        /// </summary>
+        [Test]
+        public void CalcDropMoveTime_VerySlowBall_ClampsToMaxDuration()
+        {
+            // 0.5715 / 0.001 = 571.5 s — well above maxDuration = 1.0
+            float result = PocketDropAniHelper.CalcDropMoveTime(0.5715f, 0.001f);
+
+            Assert.AreEqual(1.0f, result, 1e-5f,
+                "Very slow ball must clamp duration to the maximum (1.0 s).");
+        }
     }
 }
