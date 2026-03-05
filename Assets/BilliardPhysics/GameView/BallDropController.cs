@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using BilliardPhysics;
 using BilliardPhysics.AniHelp;
@@ -6,23 +7,6 @@ using UnityEngine;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Supporting types
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// <summary>
-/// Temporary scale-state companion for a ball undergoing the pocket-drop animation.
-/// Not a persistent field on <see cref="Ball"/>; it is created when the animation
-/// begins and discarded when the animation ends, keeping the physics model clean.
-/// </summary>
-public sealed class BallScaleState
-{
-    /// <summary>
-    /// Current uniform scale [0..1].  Updated each frame by
-    /// <see cref="BallDropController"/> and applied to the ball's
-    /// <c>Transform.localScale</c>.
-    /// </summary>
-    public float Scale = 1f;
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// <summary>
@@ -57,14 +41,6 @@ internal sealed class ActiveDrop
 {
     /// <summary>Physics-layer ball (authoritative position and velocity source).</summary>
     public Ball             BallData;
-    /// <summary>Render-layer transform driven by the animation.</summary>
-    public Transform        BallTransform;
-    /// <summary>Render-layer renderer (used to write material colour / alpha).</summary>
-    public Renderer         BallRenderer;
-    /// <summary>Base material colour captured at pocketing time.</summary>
-    public Color            BaseColor;
-    /// <summary>Temporary scale companion; discarded when animation ends.</summary>
-    public BallScaleState   ScaleState;
     /// <summary>Animation driver obtained from the pool.</summary>
     public PocketDropAniHelper Helper;
     /// <summary>
@@ -75,6 +51,11 @@ internal sealed class ActiveDrop
     public Quaternion       Rotation;
     /// <summary>Post-pocket roll path (from <c>TableConfig.PostPocketRollPath</c>).</summary>
     public SegmentData      RollPath;
+    /// <summary>
+    /// World-space centre of the pocket the ball entered.  Stored so the Z coordinate
+    /// (table depth) can be reused when building the post-pocket roll-path waypoints.
+    /// </summary>
+    public Vector3          PocketWorldPos;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -84,8 +65,8 @@ internal sealed class ActiveRoll
 {
     /// <summary>Physics-layer ball; radius and velocity are updated during rolling.</summary>
     public Ball       BallData;
-    /// <summary>Render-layer transform driven along the path.</summary>
-    public Transform  BallTransform;
+    /// <summary>Current world-space position of the rolling ball.</summary>
+    public Vector3    CurrentPosition;
     /// <summary>Path waypoints: [Start, CP0, CP1, …, End].</summary>
     public Vector3[]  Waypoints;
     /// <summary>Index of the waypoint segment the ball is currently traversing.</summary>
@@ -126,6 +107,38 @@ internal sealed class ActiveRoll
 [AddComponentMenu("BilliardPhysics/Ball Drop Controller")]
 public class BallDropController : MonoBehaviour
 {
+    // ── Callbacks ─────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Called every frame for each ball that is actively animating (drop or roll phase).
+    /// Parameters: ball ID, world-space position, uniform scale, world-space rotation.
+    ///
+    /// <para>Register a handler here to apply visual updates (position, scale, rotation)
+    /// to the ball's render-layer <c>Transform</c>.  Example registration from
+    /// <c>BilliardWorld</c>:
+    /// <code>
+    /// ballDropController.OnBallAnimationUpdate += (id, pos, scale, rot) =>
+    /// {
+    ///     ballDict[id].transform.SetPositionAndRotation(pos, rot);
+    ///     ballDict[id].transform.localScale = Vector3.one * scale;
+    /// };
+    /// </code>
+    /// </para>
+    /// </summary>
+    public Action<int, Vector3, float, Quaternion> OnBallAnimationUpdate;
+
+    /// <summary>
+    /// Called once when a ball's animation is fully complete and the ball should
+    /// be hidden or returned to a pool.  Parameter is the ball's <see cref="Ball.Id"/>.
+    ///
+    /// <para>Register a handler here to deactivate the ball's GameObject, e.g.:
+    /// <code>
+    /// ballDropController.OnBallHide += id => ballDict[id].SetActive(false);
+    /// </code>
+    /// </para>
+    /// </summary>
+    public Action<int> OnBallHide;
+
     // ── Inspector parameters ──────────────────────────────────────────────────
 
     /// <summary>Speed at which pocketed balls roll along the post-pocket path (world units / s).</summary>
@@ -155,21 +168,22 @@ public class BallDropController : MonoBehaviour
     /// Reads <see cref="Ball.Position"/>, <see cref="Ball.LinearVelocity"/>, and
     /// <see cref="Ball.AngularVelocity"/> at the pocketing moment as the authoritative
     /// data for starting the animation.
+    ///
+    /// <para>Each frame the animation runs, <see cref="OnBallAnimationUpdate"/> is invoked
+    /// with the ball's <see cref="Ball.Id"/>, animated world-space position, uniform scale,
+    /// and rotation.  Register a handler on that field to apply visual updates to the
+    /// ball's render-layer <c>Transform</c>.</para>
     /// </summary>
     /// <param name="ball">Physics ball (position and velocity authority).</param>
-    /// <param name="ballTransform">The ball's render-layer <c>Transform</c>.</param>
-    /// <param name="ballRenderer">The ball's <c>Renderer</c> (for alpha writes).</param>
     /// <param name="pocketWorldPos">World-space centre of the pocket the ball entered.</param>
     /// <param name="rollPath">
     /// Post-pocket roll path from <c>TableConfig.PostPocketRollPath</c>.
     /// Pass <c>null</c> or a path where <c>Start == End</c> with no
     /// <c>ConnectionPoints</c> to skip the roll phase.
     /// </param>
-    public void OnBallPocketed(
-        Ball ball, Transform ballTransform, Renderer ballRenderer,
-        Vector3 pocketWorldPos, SegmentData rollPath)
+    public void OnBallPocketed(Ball ball, Vector3 pocketWorldPos, SegmentData rollPath)
     {
-        StartOneDrop(ball, ballTransform, ballRenderer, pocketWorldPos, rollPath);
+        StartOneDrop(ball, pocketWorldPos, rollPath);
     }
 
     /// <summary>
@@ -178,11 +192,10 @@ public class BallDropController : MonoBehaviour
     /// animations do not interfere with each other.
     /// </summary>
     public void OnBallsPocketed(
-        IReadOnlyList<(Ball ball, Transform t, Renderer r,
-                       Vector3 pocketWorldPos, SegmentData rollPath)> drops)
+        IReadOnlyList<(Ball ball, Vector3 pocketWorldPos, SegmentData rollPath)> drops)
     {
-        foreach (var (ball, t, r, pocketWorldPos, rollPath) in drops)
-            StartOneDrop(ball, t, r, pocketWorldPos, rollPath);
+        foreach (var (ball, pocketWorldPos, rollPath) in drops)
+            StartOneDrop(ball, pocketWorldPos, rollPath);
     }
 
     /// <summary>
@@ -202,16 +215,14 @@ public class BallDropController : MonoBehaviour
 
     // ── Internal: start one drop animation ───────────────────────────────────
 
-    private void StartOneDrop(
-        Ball ball, Transform ballTransform, Renderer ballRenderer,
-        Vector3 pocketWorldPos, SegmentData rollPath)
+    private void StartOneDrop(Ball ball, Vector3 pocketWorldPos, SegmentData rollPath)
     {
         // Read the authoritative position from the physics model.
-        // Z is taken from the render transform so the animation stays in the correct plane.
+        // Z is taken from pocketWorldPos so the animation stays in the correct plane.
         Vector3 startPos = new Vector3(
             ball.Position.X.ToFloat(),
             ball.Position.Y.ToFloat(),
-            ballTransform.position.z);
+            pocketWorldPos.z);
 
         // Convert physics LinearVelocity → Unity XY vector for Bézier trajectory blending.
         // This shapes the Attract phase so the drop animation begins in the same direction
@@ -238,15 +249,12 @@ public class BallDropController : MonoBehaviour
 
         _activeDrops.Add(new ActiveDrop
         {
-            BallData      = ball,
-            BallTransform = ballTransform,
-            BallRenderer  = ballRenderer,
-            BaseColor     = ballRenderer.material.color,
-            ScaleState    = new BallScaleState { Scale = 1f },
-            Helper        = helper,
-            // Seed rotation from the current transform so there is no visual snap.
-            Rotation      = ballTransform.rotation,
-            RollPath      = rollPath,
+            BallData       = ball,
+            Helper         = helper,
+            // Start from identity rotation; no transform reference available at pocketing time.
+            Rotation       = Quaternion.identity,
+            RollPath       = rollPath,
+            PocketWorldPos = pocketWorldPos,
         });
     }
 
@@ -259,16 +267,6 @@ public class BallDropController : MonoBehaviour
             ActiveDrop      drop  = _activeDrops[i];
             PocketDropState state = drop.Helper.Update(deltaTime);
 
-            // Apply position and scale to the render transform.
-            drop.BallTransform.position   = state.position;
-            drop.ScaleState.Scale         = state.scale;
-            drop.BallTransform.localScale = Vector3.one * state.scale;
-
-            // Apply colour alpha (kept at 1 for this animation; field is reserved
-            // for callers that want to add a fade effect).
-            Color c = drop.BaseColor;
-            drop.BallRenderer.material.color = new Color(c.r, c.g, c.b, state.alpha);
-
             // Integrate visual rotation from the ball's entry angular velocity.
             // PhysicsToView.IntegrateRotation applies the correct axial-vector
             // coordinate transform (physics Z-up → view −Z).
@@ -276,12 +274,16 @@ public class BallDropController : MonoBehaviour
                 drop.BallData.AngularVelocity.X.ToFloat(),
                 drop.BallData.AngularVelocity.Y.ToFloat(),
                 drop.BallData.AngularVelocity.Z.ToFloat());
-            drop.Rotation               = PhysicsToView.IntegrateRotation(drop.Rotation, physOmega, deltaTime);
-            drop.BallTransform.rotation = drop.Rotation;
+            drop.Rotation = PhysicsToView.IntegrateRotation(drop.Rotation, physOmega, deltaTime);
+
+            // Notify the presentation layer: position, scale, and rotation for this frame.
+            // The caller (e.g. BilliardWorld) uses ball.Id to look up the view GameObject
+            // and applies these values to its Transform.
+            OnBallAnimationUpdate?.Invoke(drop.BallData.Id, state.position, state.scale, drop.Rotation);
 
             if (state.phase == PocketDropPhase.Finished)
             {
-                // Return the helper to the pool; ScaleState has no further use.
+                // Return the helper to the pool.
                 _pool.Return(drop.Helper);
 
                 // Check whether a valid roll path is configured.
@@ -292,14 +294,14 @@ public class BallDropController : MonoBehaviour
                                         path.ConnectionPoints.Count > 0));
                 if (hasPath)
                 {
-                    // Restore original scale and hand off to the roll phase.
-                    drop.BallTransform.localScale = Vector3.one;
-                    StartRoll(drop.BallData, drop.BallTransform, path);
+                    // Hand off to the roll phase.  Scale is restored to 1 via the first
+                    // OnBallAnimationUpdate callback fired inside StartRoll.
+                    StartRoll(drop.BallData, path, drop.PocketWorldPos.z);
                 }
                 else
                 {
-                    // No roll path configured: hide the ball.
-                    drop.BallTransform.gameObject.SetActive(false);
+                    // No roll path configured: notify the caller to hide the ball.
+                    OnBallHide?.Invoke(drop.BallData.Id);
                 }
 
                 _activeDrops.RemoveAt(i);
@@ -309,13 +311,12 @@ public class BallDropController : MonoBehaviour
 
     // ── Internal: build roll path and enqueue the rolling animation ───────────
 
-    private void StartRoll(Ball ball, Transform ballTransform, SegmentData path)
+    private void StartRoll(Ball ball, SegmentData path, float z)
     {
         int cpCount = path.ConnectionPoints?.Count ?? 0;
 
         // Build the flat waypoint array: [Start, CP0, CP1, …, End].
         // All Z values are kept equal (per requirement: all balls share the same Z).
-        float     z         = ballTransform.position.z;
         Vector3[] waypoints = new Vector3[cpCount + 2];
         waypoints[0] = new Vector3(path.Start.x, path.Start.y, z);
         for (int k = 0; k < cpCount; k++)
@@ -323,31 +324,30 @@ public class BallDropController : MonoBehaviour
                 path.ConnectionPoints[k].x, path.ConnectionPoints[k].y, z);
         waypoints[cpCount + 1] = new Vector3(path.End.x, path.End.y, z);
 
-        // Place the ball at the path start point.
-        ballTransform.position = waypoints[0];
-
         // Assign a random roll-direction angle at Start so each ball begins the path
         // with a unique visual orientation.  The angle is a random rotation around the
         // Z-axis (table normal), making every ball look like it arrived from a different
         // spin orientation while still rolling along the prescribed path direction.
-        float      randomYaw    = Random.Range(0f, 360f);
+        float      randomYaw     = Random.Range(0f, 360f);
         Quaternion startRotation = Quaternion.Euler(0f, 0f, randomYaw);
-        ballTransform.rotation  = startRotation;
 
         // Initialise the ball's physics velocity to match the rolling state at the first
         // path segment.  This keeps Ball.LinearVelocity and Ball.AngularVelocity in sync
         // with the visual motion from the very first frame.
         SetBallRollingVelocity(ball, waypoints, 0, RollSpeed);
 
+        // Notify the presentation layer of the initial roll position (scale=1, full size).
+        OnBallAnimationUpdate?.Invoke(ball.Id, waypoints[0], 1f, startRotation);
+
         _activeRolls.Add(new ActiveRoll
         {
-            BallData      = ball,
-            BallTransform = ballTransform,
-            Waypoints     = waypoints,
-            SegIdx        = 0,
-            SegT          = 0f,
-            Speed         = RollSpeed,
-            Rotation      = startRotation,
+            BallData        = ball,
+            CurrentPosition = waypoints[0],
+            Waypoints       = waypoints,
+            SegIdx          = 0,
+            SegT            = 0f,
+            Speed           = RollSpeed,
+            Rotation        = startRotation,
         });
     }
 
@@ -369,23 +369,25 @@ public class BallDropController : MonoBehaviour
                     roll.BallData.AngularVelocity.X.ToFloat(),
                     roll.BallData.AngularVelocity.Y.ToFloat(),
                     roll.BallData.AngularVelocity.Z.ToFloat());
-                roll.Rotation               = PhysicsToView.IntegrateRotation(roll.Rotation, physOmega, deltaTime);
-                roll.BallTransform.rotation = roll.Rotation;
+                roll.Rotation = PhysicsToView.IntegrateRotation(roll.Rotation, physOmega, deltaTime);
+
+                // Notify the presentation layer with the updated position and rotation.
+                OnBallAnimationUpdate?.Invoke(roll.BallData.Id, roll.CurrentPosition, 1f, roll.Rotation);
             }
 
             if (stopped)
             {
                 // Record the stopping position for future ball collision checks.
                 _stoppedBalls.Add((
-                    roll.BallTransform.position,
+                    roll.CurrentPosition,
                     roll.BallData.Radius.ToFloat()));
 
                 // Zero out the ball's physics velocity now that it is stationary.
                 roll.BallData.LinearVelocity  = FixVec2.Zero;
                 roll.BallData.AngularVelocity = FixVec3.Zero;
 
-                // Hide the ball (hand back to a ball pool here if available).
-                roll.BallTransform.gameObject.SetActive(false);
+                // Notify the presentation layer to hide the ball (or return it to a pool).
+                OnBallHide?.Invoke(roll.BallData.Id);
                 _activeRolls.RemoveAt(i);
             }
         }
@@ -398,6 +400,7 @@ public class BallDropController : MonoBehaviour
     /// Returns <c>true</c> when the ball reaches the End waypoint or is stopped by a
     /// previously-stopped ball.  Updates <see cref="Ball.LinearVelocity"/> and
     /// <see cref="Ball.AngularVelocity"/> to match the rolling state each frame.
+    /// Updates <see cref="ActiveRoll.CurrentPosition"/> with the new world-space position.
     /// </summary>
     private bool AdvanceRoll(ActiveRoll roll, float deltaTime)
     {
@@ -445,12 +448,12 @@ public class BallDropController : MonoBehaviour
                     // Stop at the contact edge rather than overlapping.
                     Vector3 dir = newPos - stoppedPos;
                     if (dir.sqrMagnitude < 1e-6f) dir = Vector3.right;
-                    roll.BallTransform.position = stoppedPos + dir.normalized * contactDist;
+                    roll.CurrentPosition = stoppedPos + dir.normalized * contactDist;
                     return true;
                 }
             }
 
-            roll.BallTransform.position = newPos;
+            roll.CurrentPosition = newPos;
 
             // ── Update physics velocity to match rolling state ────────────────
             // Keep LinearVelocity and AngularVelocity in sync with the path direction.
