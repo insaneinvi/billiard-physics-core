@@ -36,6 +36,7 @@ public class BilliardWorld : MonoBehaviour
     private Fix64 spinY = 0;
     
     private bool isDragging = false;
+    private readonly List<int> _stepPocketBalls = new List<int>();
     void Start()
     {
         var stepInterval = 1 / 60f;
@@ -71,6 +72,7 @@ public class BilliardWorld : MonoBehaviour
     private void OnDestroy()
     {
         // ClearDebugGraphy();
+        _physicsWorld.OnBallPocketed -= OnBallPocketedHandler;
         dirFineAdjustment.OnDeltaValue -= OnDirFineAdjustment;
         cueController.onPullDeltaChanged -= cuePullDeltaChanged;
         cueController.onReturnDeltaChanged -= cueReturnDeltaChange;
@@ -188,6 +190,7 @@ public class BilliardWorld : MonoBehaviour
         var physicsData = Resources.Load<TextAsset>("Data/tb8v_m");
         var (tableSegments, pockets, _) = TableAndPocketBinaryLoader.Load(physicsData);
         _physicsWorld = new();
+        _physicsWorld.OnBallPocketed += OnBallPocketedHandler;
         foreach (var tableSegment in tableSegments)
         {
             tableSegment.Restitution = BilliardsPhysicsDefaults.Segment_Restitution;
@@ -262,8 +265,9 @@ public class BilliardWorld : MonoBehaviour
 
     private void FixedUpdate()
     {
+        _stepPocketBalls.Clear();
         _physicsWorld.Step();
-        if (_physicsWorld.StepPocketBalls.Count > 0)
+        if (_stepPocketBalls.Count > 0)
         {
             
         }
@@ -313,5 +317,10 @@ public class BilliardWorld : MonoBehaviour
         if (!isAllBallMotionless) return;
         FixVec2 direction = new FixVec2(Fix64.FromFloat(aimController.cueDir.x), Fix64.FromFloat(aimController.cueDir.y)).Normalized;
         _physicsWorld.ApplyCueStrike(cueBall, direction, hitStrength, spinX, spinY);
+    }
+
+    private void OnBallPocketedHandler(int ballId)
+    {
+        _stepPocketBalls.Add(ballId);
     }
 }
