@@ -28,6 +28,8 @@ public class BilliardWorld : MonoBehaviour
 
     private Ball cueBall;
     private PhysicsWorld2D _physicsWorld;
+    private SegmentData dropBallRollPath;
+    
     private Vector3 playerTouchPoint;
     private Vector3 aimPoint;
     private bool isAllBallMotionless = false;
@@ -36,7 +38,6 @@ public class BilliardWorld : MonoBehaviour
     private Fix64 spinY = 0;
     
     private bool isDragging = false;
-    private readonly List<int> _stepPocketBalls = new List<int>();
     void Start()
     {
         var stepInterval = 1 / 60f;
@@ -188,7 +189,7 @@ public class BilliardWorld : MonoBehaviour
     private void InitPhysicsWorldAndBall(RackResult  rackResult)
     {
         var physicsData = Resources.Load<TextAsset>("Data/tb8v_m");
-        var (tableSegments, pockets, _) = TableAndPocketBinaryLoader.Load(physicsData);
+        var (tableSegments, pockets, rollPath) = TableAndPocketBinaryLoader.Load(physicsData);
         _physicsWorld = new();
         _physicsWorld.OnBallPocketed += OnBallPocketedHandler;
         foreach (var tableSegment in tableSegments)
@@ -265,12 +266,7 @@ public class BilliardWorld : MonoBehaviour
 
     private void FixedUpdate()
     {
-        _stepPocketBalls.Clear();
         _physicsWorld.Step();
-        if (_stepPocketBalls.Count > 0)
-        {
-            
-        }
         var cbml =  IsAllBallMotionless();
         if (!isAllBallMotionless && cbml)
         {
@@ -319,8 +315,15 @@ public class BilliardWorld : MonoBehaviour
         _physicsWorld.ApplyCueStrike(cueBall, direction, hitStrength, spinX, spinY);
     }
 
-    private void OnBallPocketedHandler(int ballId)
+    private void OnBallPocketedHandler(int pocketId,int ballId)
     {
-        _stepPocketBalls.Add(ballId);
+        var ball = _physicsWorld.Balls[ballId];
+        var pocket = _physicsWorld.Pockets[pocketId];
+        // ballDropController.OnBallPocketed(
+        //     ball,
+        //     ballDict[ball.Id].transform,
+        //     ballDict[ball.Id].GetComponent<Renderer>(),
+        //     new Vector3(pocket.Center.X.ToFloat(), pocket.Center.Y.ToFloat(),0),
+        //     tableConfig.PostPocketRollPath);
     }
 }

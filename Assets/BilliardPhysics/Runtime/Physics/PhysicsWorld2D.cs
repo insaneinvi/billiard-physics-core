@@ -62,7 +62,7 @@ namespace BilliardPhysics
         /// Subscribe in display/game-logic code to react to pocket events without
         /// polling physics internals.
         /// </summary>
-        public event Action<int> OnBallPocketed;
+        public event Action<int,int> OnBallPocketed;
 
         // ── Mutation helpers ──────────────────────────────────────────────────────
 
@@ -225,7 +225,7 @@ namespace BilliardPhysics
                     ball.IsPocketed       = true;
                     ball.LinearVelocity   = FixVec2.Zero;
                     ball.AngularVelocity  = FixVec3.Zero;
-                    OnBallPocketed?.Invoke(ball.Id);
+                    OnBallPocketed?.Invoke(pocket.Id, ball.Id);
                     break;
                 }
             }
