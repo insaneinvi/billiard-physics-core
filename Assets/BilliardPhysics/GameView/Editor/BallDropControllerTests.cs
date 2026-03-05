@@ -206,6 +206,53 @@ namespace BilliardPhysics.Tests
                 "Degenerate case (start == pocket) must return startPos unchanged.");
         }
 
+        /// <summary>
+        /// When the distance from start to pocket is less than one ball-diameter,
+        /// <see cref="PocketDropAniHelper.CalcDropTarget"/> must return
+        /// <c>pocketWorldPos</c> so the ball does not overshoot the pocket center.
+        /// </summary>
+        [Test]
+        public void CalcDropTarget_WhenDistanceLessThanDiameter_ReturnsPocketPos()
+        {
+            var   startPos     = new Vector3(0f, 0f, 0f);
+            // Pocket is only 0.3 units away — closer than one ball-diameter (0.5715).
+            var   pocketPos    = new Vector3(0.3f, 0f, 0f);
+            float ballDiameter = 0.5715f;
+
+            Vector3 result = PocketDropAniHelper.CalcDropTarget(startPos, pocketPos, ballDiameter);
+
+            // When the distance is less than one diameter, the target must equal pocketPos.
+            Assert.AreEqual(pocketPos.x, result.x, 1e-5f,
+                "X: pocket closer than diameter — target must equal pocketWorldPos.");
+            Assert.AreEqual(pocketPos.y, result.y, 1e-5f,
+                "Y: pocket closer than diameter — target must equal pocketWorldPos.");
+            Assert.AreEqual(pocketPos.z, result.z, 1e-5f,
+                "Z: pocket closer than diameter — target must equal pocketWorldPos.");
+        }
+
+        /// <summary>
+        /// When the distance from start to pocket equals exactly one ball-diameter,
+        /// <see cref="PocketDropAniHelper.CalcDropTarget"/> must return
+        /// <c>pocketWorldPos</c> (boundary case of the ≤ check).
+        /// </summary>
+        [Test]
+        public void CalcDropTarget_WhenDistanceEqualsDiameter_ReturnsPocketPos()
+        {
+            float ballDiameter = 0.5715f;
+            var   startPos     = new Vector3(0f, 0f, 0f);
+            // Place pocketPos exactly one diameter away along X.
+            var   pocketPos    = new Vector3(ballDiameter, 0f, 0f);
+
+            Vector3 result = PocketDropAniHelper.CalcDropTarget(startPos, pocketPos, ballDiameter);
+
+            Assert.AreEqual(pocketPos.x, result.x, 1e-5f,
+                "X: distance == diameter boundary — target must equal pocketWorldPos.");
+            Assert.AreEqual(pocketPos.y, result.y, 1e-5f,
+                "Y: distance == diameter boundary — target must equal pocketWorldPos.");
+            Assert.AreEqual(pocketPos.z, result.z, 1e-5f,
+                "Z: distance == diameter boundary — target must equal pocketWorldPos.");
+        }
+
         // ── CalcDropMoveTime utility ──────────────────────────────────────────────
 
         /// <summary>
@@ -249,6 +296,37 @@ namespace BilliardPhysics.Tests
 
             Assert.AreEqual(1.0f, result, 1e-5f,
                 "Very slow ball must clamp duration to the maximum (1.0 s).");
+        }
+
+        /// <summary>
+        /// When the pocket is closer than one ball-diameter, <c>CalcDropTarget</c> returns
+        /// <c>pocketWorldPos</c> and <c>CalcDropMoveTime</c> must base the duration on
+        /// the shorter actual distance — not on the full ball-diameter.
+        /// This verifies that the move-time correctly reflects the real path length.
+        /// </summary>
+        [Test]
+        public void CalcDropMoveTime_WhenPocketCloserThanDiameter_UsesActualDistance()
+        {
+            var   startPos     = new Vector3(0f, 0f, 0f);
+            // Pocket is 0.3 units away — less than one ball-diameter (0.5715).
+            var   pocketPos    = new Vector3(0.3f, 0f, 0f);
+            float ballDiameter = 0.5715f;
+            float ballSpeed    = 2.0f;
+
+            // CalcDropTarget returns pocketPos because the pocket is within one diameter.
+            Vector3 dropTarget       = PocketDropAniHelper.CalcDropTarget(startPos, pocketPos, ballDiameter);
+            float   actualDistance   = Vector3.Distance(dropTarget, startPos);
+            float   moveTime         = PocketDropAniHelper.CalcDropMoveTime(actualDistance, ballSpeed);
+
+            // Expected duration: 0.3 / 2.0 = 0.15 s.
+            float expected = 0.3f / ballSpeed;
+            Assert.AreEqual(expected, moveTime, 1e-5f,
+                "Duration must equal actual distance / speed when pocket is within one diameter.");
+
+            // Also verify that using the full diameter would give a different (wrong) answer.
+            float wrongTime = PocketDropAniHelper.CalcDropMoveTime(ballDiameter, ballSpeed);
+            Assert.AreNotEqual(wrongTime, moveTime,
+                "Using full diameter instead of actual distance must give a different (incorrect) result.");
         }
     }
 }

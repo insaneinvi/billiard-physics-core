@@ -356,12 +356,19 @@ namespace BilliardPhysics.AniHelp
         /// <summary>
         /// Computes the Attract-phase end position for the drop animation.
         ///
-        /// <para>The ball moves from <paramref name="dropStartPos"/> one
-        /// <paramref name="ballDiameter"/> toward <paramref name="pocketWorldPos"/>, so it
-        /// travels just far enough to visually enter the pocket opening without overshooting
-        /// all the way to the pocket center in a single frame-locked step:</para>
+        /// <para>Logic (mirrors the pseudocode in the design spec):</para>
+        /// <list type="bullet">
+        ///   <item>Compute <c>dir = pocketWorldPos − dropStartPos</c>.</item>
+        ///   <item>If <c>|dir| ≤ ballDiameter</c> the pocket is already within one
+        ///     ball-diameter — move all the way to <paramref name="pocketWorldPos"/>
+        ///     so the ball is never placed <em>past</em> the pocket center.</item>
+        ///   <item>Otherwise move exactly one <paramref name="ballDiameter"/> from
+        ///     <paramref name="dropStartPos"/> toward <paramref name="pocketWorldPos"/>.</item>
+        /// </list>
         /// <code>
-        /// result = dropStartPos + (pocketWorldPos − dropStartPos).normalized × ballDiameter
+        /// dir = pocketWorldPos − dropStartPos
+        /// if (|dir| ≤ ballDiameter)  result = pocketWorldPos
+        /// else                        result = dropStartPos + dir.normalized × ballDiameter
         /// </code>
         /// <para>Pass the result as <see cref="PocketDropRequest.dropTarget"/> before
         /// calling <see cref="StartDrop"/>.</para>
@@ -369,42 +376,59 @@ namespace BilliardPhysics.AniHelp
         /// <param name="dropStartPos">Ball world position at the pocketing moment.</param>
         /// <param name="pocketWorldPos">World-space centre of the pocket.</param>
         /// <param name="ballDiameter">Ball diameter in the same world units (e.g. 0.5715).</param>
-        /// <returns>The target position one <paramref name="ballDiameter"/> toward the pocket.</returns>
+        /// <returns>
+        /// The drop target: either one <paramref name="ballDiameter"/> toward the pocket, or
+        /// <paramref name="pocketWorldPos"/> itself when the pocket is within one diameter.
+        /// </returns>
         public static Vector3 CalcDropTarget(
             Vector3 dropStartPos, Vector3 pocketWorldPos, float ballDiameter)
         {
             Vector3 dir = pocketWorldPos - dropStartPos;
+
             // Guard against degenerate case where start == pocket.
             if (dir.sqrMagnitude < ZeroVectorThreshold)
                 return dropStartPos;
+
+            // If the pocket center is within one ball diameter, move all the way to
+            // pocketWorldPos so the target is never placed beyond the pocket center.
+            if (dir.magnitude <= ballDiameter)
+                return pocketWorldPos;
+
+            // Normal case: move exactly one ball-diameter toward the pocket.
             return dropStartPos + dir.normalized * ballDiameter;
         }
 
         /// <summary>
-        /// Computes the total drop-animation duration from the ball's linear speed at the
-        /// moment of pocketing:
+        /// Computes the drop-animation duration from the actual travel distance and the
+        /// ball's linear speed at the moment of pocketing:
         /// <code>
-        /// moveTime = ballDiameter / ballLinearSpeed
+        /// moveTime = distance / ballLinearSpeed
         /// </code>
-        /// <para>This ensures faster-moving balls complete the drop animation quickly while
-        /// slower balls take proportionally longer, preserving the visual sense of speed.</para>
+        /// <para>Pass <c>(dropTarget − dropStartPos).magnitude</c> as
+        /// <paramref name="distance"/> so the duration scales with the real path length
+        /// (which may be shorter than one ball-diameter when the pocket is very close).
+        /// This preserves the visual sense of speed: faster balls animate quickly; slower
+        /// balls take proportionally longer.</para>
         /// <para>The result is clamped to [<paramref name="minDuration"/>,
         /// <paramref name="maxDuration"/>] to avoid excessively long or imperceptibly short
         /// animations when the ball speed is near zero or extremely high.</para>
         /// </summary>
-        /// <param name="ballDiameter">Ball diameter in world units.</param>
+        /// <param name="distance">
+        /// Actual distance from <c>dropStartPos</c> to <c>dropTarget</c> in world units.
+        /// Typically <c>Vector3.Distance(dropTarget, dropStartPos)</c>.
+        /// </param>
         /// <param name="ballLinearSpeed">Ball linear speed (world units/s) at pocketing.</param>
         /// <param name="minDuration">Minimum allowed duration (default 0.05 s).</param>
         /// <param name="maxDuration">Maximum allowed duration (default 1.0 s).</param>
         /// <returns>Clamped animation duration in seconds.</returns>
         public static float CalcDropMoveTime(
-            float ballDiameter, float ballLinearSpeed,
+            float distance, float ballLinearSpeed,
             float minDuration = 0.05f, float maxDuration = 1.0f)
         {
             // Guard against near-zero speed to prevent division by zero or huge durations.
             if (ballLinearSpeed < 1e-4f)
                 return minDuration;
-            return Mathf.Clamp(ballDiameter / ballLinearSpeed, minDuration, maxDuration);
+            return Mathf.Clamp(distance / ballLinearSpeed, minDuration, maxDuration);
         }
 
         // ── Private: evaluate state at an absolute time ───────────────────────────
