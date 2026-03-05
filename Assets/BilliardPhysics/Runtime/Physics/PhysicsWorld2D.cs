@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -9,7 +10,7 @@ namespace BilliardPhysics
         private readonly List<Ball>    _balls           = new List<Ball>();
         private readonly List<Segment> _tableSegments   = new List<Segment>();
         private readonly List<Pocket>  _pockets         = new List<Pocket>();
-        private readonly List<int>     _stepPocketBalls = new List<int>();
+
         // Spatial grid for segment broadphase; rebuilt when segments change.
         private SegmentGrid _segmentGrid;
         private bool        _segmentGridDirty = true;
@@ -55,7 +56,13 @@ namespace BilliardPhysics
         public IReadOnlyList<Segment> TableSegments => _tableSegments;
         public IReadOnlyList<Pocket>  Pockets       => _pockets;
 
-        public IReadOnlyList<int>     StepPocketBalls => _stepPocketBalls;
+        /// <summary>
+        /// Raised each time a ball is captured by a pocket during <see cref="Step"/>.
+        /// The argument is the <see cref="Ball.Id"/> of the pocketed ball.
+        /// Subscribe in display/game-logic code to react to pocket events without
+        /// polling physics internals.
+        /// </summary>
+        public event Action<int> OnBallPocketed;
 
         // ── Mutation helpers ──────────────────────────────────────────────────────
 
@@ -79,7 +86,6 @@ namespace BilliardPhysics
             _segmentGridDirty = true;
         }
 
-        private void ResetStepPocketBalls() => _stepPocketBalls.Clear();
         // ── Simulation step ───────────────────────────────────────────────────────
 
         public void Step()
@@ -91,7 +97,6 @@ namespace BilliardPhysics
                 _segmentGridDirty = false;
             }
 
-            ResetStepPocketBalls();
             CCDSystem.ResetStats();
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
@@ -220,7 +225,7 @@ namespace BilliardPhysics
                     ball.IsPocketed       = true;
                     ball.LinearVelocity   = FixVec2.Zero;
                     ball.AngularVelocity  = FixVec3.Zero;
-                    _stepPocketBalls.Add(ball.Id);
+                    OnBallPocketed?.Invoke(ball.Id);
                     break;
                 }
             }
