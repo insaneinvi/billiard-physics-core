@@ -26,6 +26,15 @@ namespace BilliardPhysics
             // Normalize direction defensively.
             FixVec2 dir = direction.Normalized;
 
+            // Clamp spin offsets to the physical contact range [-R, +R].
+            // A value outside ±R is geometrically impossible (the cue tip cannot
+            // contact the ball more than one radius off-centre) and would produce
+            // angular velocities far beyond what any real cushion or pocket rim can
+            // handle via Coulomb-limited friction.
+            Fix64 R = ball.Radius;
+            spinX = Fix64.Max(-R, Fix64.Min(R, spinX));
+            spinY = Fix64.Max(-R, Fix64.Min(R, spinY));
+
             // Linear impulse J = strength * dir → velocity change Δv = J / m.
             ball.LinearVelocity = dir * strength / ball.Mass;
 

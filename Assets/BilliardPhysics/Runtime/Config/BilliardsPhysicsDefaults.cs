@@ -43,10 +43,15 @@ namespace BilliardPhysics
         /// a pocket's capture radius is considered pocketed (sunk).
         /// Balls faster than this value pass through the pocket mouth without being
         /// captured immediately; they must slow down (e.g. via rim collisions) first.
-        /// Default: 5 (500 mm/s scaled by 1/100) — the minimum cue-strike speed, so only truly slow/rolling
-        /// balls are captured without first bouncing off the pocket rim.
+        /// Default: 500 (physics units/s).  All real-game balls top out at roughly
+        /// 83 physics units/s (ApplyCueStrike_StrengthMax / Ball_Mass), which is well
+        /// below this threshold, so any ball that reaches the pocket capture zone in
+        /// normal play is captured immediately.  The higher value also ensures that
+        /// spin-induced tangential velocity after a pocket-rim bounce (≤ ~29 units/s
+        /// for maximum Coulomb-limited side-spin) never prevents capture.
+        /// Only artificially fast test balls (>= 500 units/s) are held back.
         /// </summary>
-        public static readonly Fix64 PocketSinkSpeedThreshold = Fix64.From(5);
+        public static readonly Fix64 PocketSinkSpeedThreshold = Fix64.From(500);
 
         /// <summary>
         /// Coefficient of restitution applied to a pocket's <see cref="Pocket.RimSegment"/>
