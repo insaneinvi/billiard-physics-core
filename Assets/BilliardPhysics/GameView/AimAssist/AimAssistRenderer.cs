@@ -342,6 +342,56 @@ namespace BilliardPhysics.AimAssist
             ClearLine(_targetBallPostLineOutline);
         }
 
+        /// <summary>
+        /// Computes the post-collision velocity directions of the cue ball and the target
+        /// ball using the standard equal-mass elastic collision formula (no spin or friction).
+        /// </summary>
+        /// <remarks>
+        /// The calculation follows these steps:
+        /// <list type="number">
+        ///   <item>Collision normal: <c>n = (pHit − targetBallCenter).normalized</c></item>
+        ///   <item>Normal velocity component: <c>vn = dot(cueBallVelocity, n)</c></item>
+        ///   <item>Cue-ball after: <c>cueBallAfter = cueBallVelocity − vn·n</c>
+        ///         (the tangential component is retained by the cue ball)</item>
+        ///   <item>Target-ball after: <c>targetBallAfter = vn·n</c>
+        ///         (the normal component is fully transferred to the target ball)</item>
+        /// </list>
+        /// The returned vectors are <em>not</em> normalized; their magnitude equals the
+        /// corresponding speed component.
+        /// </remarks>
+        /// <param name="cueBallVelocity">Velocity of the cue ball immediately before impact.</param>
+        /// <param name="pHit">Contact point between the two ball surfaces.</param>
+        /// <param name="targetBallCenter">Centre of the target ball.</param>
+        /// <param name="cueBallAfter">
+        /// Output: cue-ball velocity after the collision (tangential component of
+        /// <paramref name="cueBallVelocity"/>).
+        /// </param>
+        /// <param name="targetBallAfter">
+        /// Output: target-ball velocity after the collision (normal component of
+        /// <paramref name="cueBallVelocity"/>).
+        /// </param>
+        public static void ComputeElasticCollisionDirections(
+            Vector2 cueBallVelocity,
+            Vector2 pHit,
+            Vector2 targetBallCenter,
+            out Vector2 cueBallAfter,
+            out Vector2 targetBallAfter)
+        {
+            // Step 1: Collision normal – unit vector pointing from the target-ball
+            //         centre toward the contact point P_hit.
+            Vector2 n = (pHit - targetBallCenter).normalized;
+
+            // Step 2: Component of the cue-ball velocity along the collision axis.
+            float vn = Vector2.Dot(cueBallVelocity, n);
+
+            // Step 3: After the collision the cue ball retains only its tangential
+            //         (perpendicular) component.
+            cueBallAfter = cueBallVelocity - vn * n;
+
+            // Step 4: The entire normal component is transferred to the target ball.
+            targetBallAfter = vn * n;
+        }
+
         // ── Collision-detection result ────────────────────────────────────────────
 
         private struct HitResult
