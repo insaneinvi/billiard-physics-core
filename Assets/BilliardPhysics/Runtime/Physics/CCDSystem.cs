@@ -174,8 +174,8 @@ namespace BilliardPhysics
 
         // Small safety margin (in world/physics units) added to broadphase distance checks
         // so that objects just barely within reach are not incorrectly culled by integer
-        // rounding.  Ball radii are ~28.6 units, so 1 unit is safely sub-radius.
-        private static readonly Fix64 BroadphaseTolerance = Fix64.From(1);
+        // rounding.  Ball radii are 0.286 units, so 0.01 unit is safely sub-radius.
+        private static readonly Fix64 BroadphaseTolerance = Fix64.FromFloat(0.01f);
 
         // ── Swept circle vs segment ───────────────────────────────────────────────
 
