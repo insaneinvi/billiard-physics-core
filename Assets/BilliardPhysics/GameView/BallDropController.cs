@@ -41,8 +41,17 @@ public sealed class PocketDropAniHelperPool
 /// <summary>Data container for one active pocket-drop animation.</summary>
 internal sealed class ActiveDrop
 {
-    /// <summary>Physics-layer ball (authoritative position and velocity source).</summary>
-    public Ball             BallData;
+    /// <summary>
+    /// Unique ID of the physics-layer ball (<see cref="Ball.Id"/>).
+    /// Used to look up the ball in <see cref="PhysicsWorld2D.Balls"/> rather than
+    /// storing a struct copy that would become stale after <see cref="PhysicsWorld2D.Step"/>.
+    /// </summary>
+    public int              BallId;
+    /// <summary>
+    /// Ball radius (immutable after construction; cached here so the drop animation
+    /// can compute geometry without a world look-up on every frame).
+    /// </summary>
+    public float            BallRadius;
     /// <summary>Animation driver obtained from the pool.</summary>
     public PocketDropAniHelper Helper;
     /// <summary>
@@ -71,8 +80,18 @@ internal sealed class ActiveDrop
 /// <summary>Data container for one active post-pocket roll animation.</summary>
 internal sealed class ActiveRoll
 {
-    /// <summary>Physics-layer ball; radius and velocity are updated during rolling.</summary>
-    public Ball       BallData;
+    /// <summary>
+    /// Unique ID of the physics-layer ball (<see cref="Ball.Id"/>).
+    /// All mutable ball state (velocity, angular velocity) is read and written through
+    /// <see cref="PhysicsWorld2D.Balls"/> using this ID, so changes are always applied
+    /// to the authoritative Ball[] element rather than a stale struct copy.
+    /// </summary>
+    public int        BallId;
+    /// <summary>
+    /// Ball radius (immutable after construction; cached here so overlap checks and
+    /// velocity computations can run without a world look-up on every frame).
+    /// </summary>
+    public float      BallRadius;
     /// <summary>Current world-space position of the rolling ball.</summary>
     public Vector3    CurrentPosition;
     /// <summary>Path waypoints: [Start, CP0, CP1, …, End].</summary>
@@ -154,6 +173,37 @@ public class BallDropController : MonoBehaviour
     public float RollSpeed = 0.5f;
 
     public float originScale = 0.5715f;
+    // ── Physics world reference ───────────────────────────────────────────────
+
+    // Authoritative source for ball state.  Must be set via BindPhysicsWorld()
+    // before any animation starts so that velocity writes go to Ball[] in-place.
+    private PhysicsWorld2D _physicsWorld;
+
+    /// <summary>
+    /// Binds the physics world so that <see cref="Ball.LinearVelocity"/> and
+    /// <see cref="Ball.AngularVelocity"/> are kept in sync with the roll animation
+    /// by writing directly to the authoritative <see cref="PhysicsWorld2D.Balls"/> array.
+    ///
+    /// <para>Call this once before invoking <see cref="OnBallPocketed"/>.</para>
+    /// </summary>
+    public void BindPhysicsWorld(PhysicsWorld2D physicsWorld)
+    {
+        _physicsWorld = physicsWorld;
+    }
+
+    /// <summary>
+    /// Returns the index in <see cref="PhysicsWorld2D.Balls"/> of the ball with the
+    /// given Id, or -1 if the world is not bound or the ball is not found.
+    /// </summary>
+    private int FindBallIndexById(int id)
+    {
+        if (_physicsWorld == null) return -1;
+        Ball[] balls = _physicsWorld.Balls;
+        for (int i = 0; i < _physicsWorld.BallCount; i++)
+            if (balls[i].Id == id) return i;
+        return -1;
+    }
+
     // ── Internal state ────────────────────────────────────────────────────────
 
     // Object pool: reuse PocketDropAniHelper instances to avoid per-pocket GC.
@@ -234,7 +284,7 @@ public class BallDropController : MonoBehaviour
     {
         for (int i = _activeDrops.Count - 1; i >= 0; i--)
         {
-            if (_activeDrops[i].BallData.Id == ballId)
+            if (_activeDrops[i].BallId == ballId)
             {
                 _pool.Return(_activeDrops[i].Helper);
                 _activeDrops.RemoveAt(i);
@@ -243,7 +293,7 @@ public class BallDropController : MonoBehaviour
         }
         for (int i = _activeRolls.Count - 1; i >= 0; i--)
         {
-            if (_activeRolls[i].BallData.Id == ballId)
+            if (_activeRolls[i].BallId == ballId)
                 _activeRolls.RemoveAt(i);
         }
     }
@@ -318,7 +368,8 @@ public class BallDropController : MonoBehaviour
 
         _activeDrops.Add(new ActiveDrop
         {
-            BallData             = ball,
+            BallId               = ball.Id,
+            BallRadius           = ball.Radius.ToFloat(),
             Helper               = helper,
             // Preserve the ball's last rendered orientation so the drop animation
             // continues smoothly from where the physics simulation left off.
@@ -356,7 +407,7 @@ public class BallDropController : MonoBehaviour
             // Notify the presentation layer: position, scale, and rotation for this frame.
             // The caller (e.g. BilliardWorld) uses ball.Id to look up the view GameObject
             // and applies these values to its Transform.
-            OnBallAnimationUpdate?.Invoke(drop.BallData.Id, state.position, state.scale, drop.Rotation, false);
+            OnBallAnimationUpdate?.Invoke(drop.BallId, state.position, state.scale, drop.Rotation, false);
 
             if (state.phase == PocketDropPhase.Finished)
             {
@@ -373,12 +424,12 @@ public class BallDropController : MonoBehaviour
                 {
                     // Hand off to the roll phase.  Scale is restored to 1 via the first
                     // OnBallAnimationUpdate callback fired inside StartRoll.
-                    StartRoll(drop.BallData, path, drop.PocketWorldPos.z);
+                    StartRoll(drop.BallId, drop.BallRadius, path, drop.PocketWorldPos.z);
                 }
                 else
                 {
                     // No roll path configured: notify the caller to hide the ball.
-                    OnBallHide?.Invoke(drop.BallData.Id);
+                    OnBallHide?.Invoke(drop.BallId);
                 }
 
                 _activeDrops.RemoveAt(i);
@@ -388,7 +439,9 @@ public class BallDropController : MonoBehaviour
 
     // ── Internal: build roll path and enqueue the rolling animation ───────────
 
-    private void StartRoll(Ball ball, SegmentData path, float z)
+    /// <param name="ballId">Unique ID of the ball entering the roll phase.</param>
+    /// <param name="ballRadius">Ball radius in physics units (cached from the pocketing snapshot).</param>
+    private void StartRoll(int ballId, float ballRadius, SegmentData path, float z)
     {
         int cpCount = path.ConnectionPoints?.Count ?? 0;
 
@@ -406,7 +459,7 @@ public class BallDropController : MonoBehaviour
         // position.  Push the new ball's start backwards along the path (away from
         // waypoints[1]) so it does not overlap any ball that is already rolling or
         // already stopped on the path.
-        AdjustRollStartForOverlap(waypoints, ball.Radius.ToFloat());
+        AdjustRollStartForOverlap(waypoints, ballRadius);
 
         // Assign a random roll-direction angle at Start so each ball begins the path
         // with a unique visual orientation.  The angle is a random rotation around the
@@ -416,16 +469,17 @@ public class BallDropController : MonoBehaviour
         Quaternion startRotation = Quaternion.Euler(0f, 0f, randomYaw);
 
         // Initialise the ball's physics velocity to match the rolling state at the first
-        // path segment.  This keeps Ball.LinearVelocity and Ball.AngularVelocity in sync
-        // with the visual motion from the very first frame.
-        SetBallRollingVelocity(ball, waypoints, 0, RollSpeed);
+        // path segment.  This writes LinearVelocity and AngularVelocity directly into
+        // PhysicsWorld2D.Balls[idx] so that the authoritative array is always up-to-date.
+        SetBallRollingVelocity(ballId, waypoints, 0, RollSpeed);
 
         // Notify the presentation layer of the initial roll position (scale=1, full size).
-        OnBallAnimationUpdate?.Invoke(ball.Id, waypoints[0], 1f, startRotation, true);
+        OnBallAnimationUpdate?.Invoke(ballId, waypoints[0], 1f, startRotation, true);
 
         _activeRolls.Add(new ActiveRoll
         {
-            BallData        = ball,
+            BallId          = ballId,
+            BallRadius      = ballRadius,
             CurrentPosition = waypoints[0],
             Waypoints       = waypoints,
             SegIdx          = 0,
@@ -484,7 +538,7 @@ public class BallDropController : MonoBehaviour
             // Check against balls that are currently rolling (not yet stopped).
             foreach (ActiveRoll other in _activeRolls)
             {
-                float otherRadius = other.BallData.Radius.ToFloat();
+                float otherRadius = other.BallRadius;
                 float contactDist = selfRadius + otherRadius;
                 if ((start - other.CurrentPosition).sqrMagnitude < contactDist * contactDist)
                 {
@@ -508,16 +562,23 @@ public class BallDropController : MonoBehaviour
             if (!stopped)
             {
                 // Integrate visual rotation from the ball's current angular velocity.
-                // The angular velocity was just updated inside AdvanceRoll to match the
-                // rolling state, so this produces correct spin for the path direction.
-                Vector3 physOmega = new Vector3(
-                    roll.BallData.AngularVelocity.X.ToFloat(),
-                    roll.BallData.AngularVelocity.Y.ToFloat(),
-                    roll.BallData.AngularVelocity.Z.ToFloat());
+                // The angular velocity was just written into PhysicsWorld2D.Balls[idx]
+                // by SetBallRollingVelocity inside AdvanceRoll, so reading it back here
+                // ensures we always use the authoritative value rather than a stale copy.
+                Vector3 physOmega = Vector3.zero;
+                int ballIdx = FindBallIndexById(roll.BallId);
+                if (ballIdx >= 0)
+                {
+                    var omega = _physicsWorld.Balls[ballIdx].AngularVelocity;
+                    physOmega = new Vector3(
+                        omega.X.ToFloat(),
+                        omega.Y.ToFloat(),
+                        omega.Z.ToFloat());
+                }
                 roll.Rotation = PhysicsToView.IntegrateRotation(roll.Rotation, physOmega, deltaTime);
 
                 // Notify the presentation layer with the updated position and rotation.
-                OnBallAnimationUpdate?.Invoke(roll.BallData.Id, roll.CurrentPosition, 1f, roll.Rotation, true);
+                OnBallAnimationUpdate?.Invoke(roll.BallId, roll.CurrentPosition, 1f, roll.Rotation, true);
             }
 
             if (stopped)
@@ -525,14 +586,19 @@ public class BallDropController : MonoBehaviour
                 // Record the stopping position for future ball collision checks.
                 _stoppedBalls.Add((
                     roll.CurrentPosition,
-                    roll.BallData.Radius.ToFloat()));
+                    roll.BallRadius));
 
-                // Zero out the ball's physics velocity now that it is stationary.
-                roll.BallData.LinearVelocity  = FixVec2.Zero;
-                roll.BallData.AngularVelocity = FixVec3.Zero;
+                // Zero out the ball's physics velocity in the authoritative Ball[] array
+                // so that PhysicsWorld2D always reflects the ball's stationary state.
+                int ballIdx = FindBallIndexById(roll.BallId);
+                if (ballIdx >= 0)
+                {
+                    _physicsWorld.Balls[ballIdx].LinearVelocity  = FixVec2.Zero;
+                    _physicsWorld.Balls[ballIdx].AngularVelocity = FixVec3.Zero;
+                }
 
                 // Notify the presentation layer to hide the ball (or return it to a pool).
-                OnBallHide?.Invoke(roll.BallData.Id);
+                OnBallHide?.Invoke(roll.BallId);
                 _activeRolls.RemoveAt(i);
             }
         }
@@ -549,7 +615,7 @@ public class BallDropController : MonoBehaviour
     /// </summary>
     private bool AdvanceRoll(ActiveRoll roll, float deltaTime)
     {
-        float selfRadius = roll.BallData.Radius.ToFloat();
+        float selfRadius = roll.BallRadius;
 
         while (deltaTime > 0f && roll.SegIdx < roll.Waypoints.Length - 1)
         {
@@ -601,10 +667,11 @@ public class BallDropController : MonoBehaviour
             roll.CurrentPosition = newPos;
 
             // ── Update physics velocity to match rolling state ────────────────
-            // Keep LinearVelocity and AngularVelocity in sync with the path direction.
+            // Write LinearVelocity and AngularVelocity directly to PhysicsWorld2D.Balls[idx]
+            // so that the authoritative array stays in sync with the visual rolling state.
             // Only update while still within the path (not after reaching End).
             if (roll.SegIdx < roll.Waypoints.Length - 1)
-                SetBallRollingVelocity(roll.BallData, roll.Waypoints, roll.SegIdx, roll.Speed);
+                SetBallRollingVelocity(roll.BallId, roll.Waypoints, roll.SegIdx, roll.Speed);
         }
 
         // Returns true if the ball has reached (or overshot) the End waypoint.
@@ -614,20 +681,28 @@ public class BallDropController : MonoBehaviour
     // ── Helper: set Ball.LinearVelocity + AngularVelocity for rolling along path ──
 
     /// <summary>
-    /// Sets <see cref="Ball.LinearVelocity"/> and <see cref="Ball.AngularVelocity"/> to
-    /// match the no-slip rolling state for the specified path segment and speed.
+    /// Writes <see cref="Ball.LinearVelocity"/> and <see cref="Ball.AngularVelocity"/>
+    /// directly into <see cref="PhysicsWorld2D.Balls"/> (via <c>ref Ball</c>) to match
+    /// the no-slip rolling state for the specified path segment and speed.
+    ///
+    /// <para>The mutation is applied to the authoritative Ball[] element so that any
+    /// subsequent <see cref="PhysicsWorld2D.Step"/> call or AI read sees the correct
+    /// velocity instead of a stale struct copy.</para>
     ///
     /// <para>Rolling-without-slip constraint (physics Z-up frame, r = ball radius):
     /// <c>ω.X = −Lv.Y / r</c>, <c>ω.Y = +Lv.X / r</c>, <c>ω.Z = 0</c>.</para>
     /// </summary>
-    /// <param name="ball">Ball whose velocity fields are updated.</param>
+    /// <param name="ballId">ID of the ball whose velocity fields are updated.</param>
     /// <param name="waypoints">Path waypoint array.</param>
     /// <param name="segIdx">Index of the current segment (start waypoint index).</param>
     /// <param name="speed">Rolling speed (world units / second).</param>
-    private static void SetBallRollingVelocity(
-        Ball ball, Vector3[] waypoints, int segIdx, float speed)
+    private void SetBallRollingVelocity(
+        int ballId, Vector3[] waypoints, int segIdx, float speed)
     {
         if (segIdx >= waypoints.Length - 1) return;
+
+        int idx = FindBallIndexById(ballId);
+        if (idx < 0) return;
 
         Vector3 dir = waypoints[segIdx + 1] - waypoints[segIdx];
         if (dir.sqrMagnitude < 1e-8f) return;
@@ -635,7 +710,10 @@ public class BallDropController : MonoBehaviour
 
         float vx = dir.x * speed;
         float vy = dir.y * speed;
-        float r  = ball.Radius.ToFloat();
+
+        // Use ref so every field write goes directly to the array element.
+        ref Ball ball = ref _physicsWorld.Balls[idx];
+        float r = ball.Radius.ToFloat();
 
         ball.LinearVelocity = new FixVec2(
             Fix64.FromFloat(vx),

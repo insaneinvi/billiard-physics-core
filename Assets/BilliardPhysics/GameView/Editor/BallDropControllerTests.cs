@@ -507,7 +507,8 @@ namespace BilliardPhysics.Tests
                     as List<ActiveRoll>;
                 activeRolls.Add(new ActiveRoll
                 {
-                    BallData        = ball,
+                    BallId          = ball.Id,
+                    BallRadius      = ball.Radius.ToFloat(),
                     CurrentPosition = new Vector3(0f, 0f, 0f),
                     Waypoints       = new[] { new Vector3(0f, 0f, 0f), new Vector3(5f, 0f, 0f) },
                     SegIdx          = 0,
@@ -554,7 +555,8 @@ namespace BilliardPhysics.Tests
                     as List<ActiveRoll>;
                 activeRolls.Add(new ActiveRoll
                 {
-                    BallData        = ball,
+                    BallId          = ball.Id,
+                    BallRadius      = ball.Radius.ToFloat(),
                     CurrentPosition = new Vector3(0f, 0f, 0f),
                     Waypoints       = new[] { new Vector3(0f, 0f, 0f), new Vector3(0.1f, 0f, 0f) },
                     SegIdx          = 0,
@@ -568,6 +570,119 @@ namespace BilliardPhysics.Tests
 
                 Assert.AreEqual(ball.Id, hiddenBallId,
                     "OnBallHide must be invoked with the ball's ID when its roll animation completes.");
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        // ── Velocity sync: roll phase writes to PhysicsWorld2D.Balls[] ────────────
+
+        /// <summary>
+        /// When a roll animation starts, <c>SetBallRollingVelocity</c> (called from
+        /// <c>StartRoll</c> / <c>AdvanceRoll</c>) must write <see cref="Ball.LinearVelocity"/>
+        /// and <see cref="Ball.AngularVelocity"/> directly into the authoritative
+        /// <see cref="PhysicsWorld2D.Balls"/> array, not into a stale struct copy.
+        /// </summary>
+        [Test]
+        public void TickRolls_WhileRolling_VelocityIsWrittenToPhysicsWorldArray()
+        {
+            var go = new GameObject();
+            try
+            {
+                var controller = go.AddComponent<BallDropController>();
+
+                // Create and bind a physics world with the ball.
+                var world = new PhysicsWorld2D();
+                var ball  = new Ball(0); // AddBall assigns Id = 0
+                world.AddBall(ball);
+                controller.BindPhysicsWorld(world);
+
+                int   ballId     = world.Balls[0].Id;
+                float ballRadius = world.Balls[0].Radius.ToFloat();
+
+                // Inject an ActiveRoll that is partway through a path in the +X direction.
+                var activeRolls = ActiveRollsField.GetValue(controller) as List<ActiveRoll>;
+                activeRolls.Add(new ActiveRoll
+                {
+                    BallId          = ballId,
+                    BallRadius      = ballRadius,
+                    CurrentPosition = new Vector3(0f, 0f, 0f),
+                    Waypoints       = new[] { new Vector3(0f, 0f, 0f), new Vector3(5f, 0f, 0f) },
+                    SegIdx          = 0,
+                    SegT            = 0f,
+                    Speed           = 0.5f,
+                    Rotation        = Quaternion.identity,
+                });
+
+                // Tick one frame (ball should still be rolling).
+                TickRollsMethod.Invoke(controller, new object[] { 1f / 60f });
+
+                // The ball's LinearVelocity in the physics world must now reflect the +X
+                // rolling velocity, not the default zero it was initialised with.
+                var lv = world.Balls[0].LinearVelocity;
+                Assert.Greater(lv.X.ToFloat(), 0f,
+                    "LinearVelocity.X must be positive (rolling in +X) after TickRolls.");
+                Assert.AreEqual(0f, lv.Y.ToFloat(), 1e-5f,
+                    "LinearVelocity.Y must be zero (straight +X path).");
+
+                // Angular velocity must satisfy the no-slip constraint: ω.Y = Lv.X / r.
+                var av = world.Balls[0].AngularVelocity;
+                float expectedOmegaY = lv.X.ToFloat() / ballRadius;
+                Assert.AreEqual(expectedOmegaY, av.Y.ToFloat(), 1e-4f,
+                    "AngularVelocity.Y must equal LinearVelocity.X / radius (no-slip).");
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        /// <summary>
+        /// When a roll animation completes (ball reaches the end waypoint),
+        /// <see cref="BallDropController"/> must zero <see cref="Ball.LinearVelocity"/>
+        /// and <see cref="Ball.AngularVelocity"/> in the authoritative
+        /// <see cref="PhysicsWorld2D.Balls"/> array so the physics world reflects the
+        /// ball's stationary state.
+        /// </summary>
+        [Test]
+        public void TickRolls_WhenStopped_VelocityIsZeroedInPhysicsWorldArray()
+        {
+            var go = new GameObject();
+            try
+            {
+                var controller = go.AddComponent<BallDropController>();
+
+                // Create and bind a physics world with the ball.
+                var world = new PhysicsWorld2D();
+                var ball  = new Ball(0); // AddBall assigns Id = 0
+                world.AddBall(ball);
+                controller.BindPhysicsWorld(world);
+
+                int   ballId     = world.Balls[0].Id;
+                float ballRadius = world.Balls[0].Radius.ToFloat();
+
+                // Give the ball a non-zero velocity so we can verify it is zeroed.
+                world.Balls[0].LinearVelocity  = new FixVec2(Fix64.One, Fix64.Zero);
+                world.Balls[0].AngularVelocity = new FixVec3(Fix64.Zero, Fix64.One, Fix64.Zero);
+
+                // Short path: 0.1 units at 0.5 u/s completes in 0.2 s.
+                var activeRolls = ActiveRollsField.GetValue(controller) as List<ActiveRoll>;
+                activeRolls.Add(new ActiveRoll
+                {
+                    BallId          = ballId,
+                    BallRadius      = ballRadius,
+                    CurrentPosition = new Vector3(0f, 0f, 0f),
+                    Waypoints       = new[] { new Vector3(0f, 0f, 0f), new Vector3(0.1f, 0f, 0f) },
+                    SegIdx          = 0,
+                    SegT            = 0f,
+                    Speed           = 0.5f,
+                    Rotation        = Quaternion.identity,
+                });
+
+                // Advance with more than enough time to finish the roll.
+                TickRollsMethod.Invoke(controller, new object[] { 1.0f });
+
+                // Both velocity fields must be zero in the physics array.
+                Assert.AreEqual(FixVec2.Zero, world.Balls[0].LinearVelocity,
+                    "LinearVelocity must be zero in PhysicsWorld2D after roll completes.");
+                Assert.AreEqual(FixVec3.Zero, world.Balls[0].AngularVelocity,
+                    "AngularVelocity must be zero in PhysicsWorld2D after roll completes.");
             }
             finally { Object.DestroyImmediate(go); }
         }
