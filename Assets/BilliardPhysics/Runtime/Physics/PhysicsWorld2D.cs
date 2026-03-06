@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using UnityEngine;
 
 namespace BilliardPhysics
@@ -12,6 +13,12 @@ namespace BilliardPhysics
     // List<Ball> was replaced with Ball[] + BallCount to enable zero-copy
     // Span<Ball> / MemoryMarshal access for AI batch inference or physics simulation.
     // Call GetBallsSpan() to obtain a Span<Ball> over the valid ball range.
+    //
+    // Bulk copy API (all zero per-element overhead):
+    //   • CopyBallsTo(Ball[])       – Array.Copy, single native block copy
+    //   • CopyBallsTo(Span<Ball>)   – Span.CopyTo, JIT-lowered to memcpy
+    //   • SnapshotBalls()           – allocates + copies; use when a stable snapshot is needed
+    //   • UnsafeCopyBallsTo(Ball*)  – unsafe Unsafe.CopyBlock for interop / native memory
     //
     // IMPORTANT: after calling Step() or any mutation, always read ball state from
     // Balls[i] (index into the array) rather than from a Ball value captured before
@@ -91,6 +98,117 @@ namespace BilliardPhysics
         /// Suitable for zero-copy bulk reads by AI inference or physics simulation tools.
         /// </summary>
         public Span<Ball> GetBallsSpan() => new Span<Ball>(_balls, 0, BallCount);
+
+        // ── Bulk copy helpers ─────────────────────────────────────────────────────
+        // Ball is a blittable struct (all fields are unmanaged value types), so all
+        // methods below map to a single native block-copy rather than a per-element loop.
+        //
+        // Choosing the right overload:
+        //   • CopyBallsTo(Ball[])        – destination is an existing managed array
+        //   • CopyBallsTo(Span<Ball>)    – destination is a Span (stackalloc, rented, or array slice)
+        //   • SnapshotBalls()            – need a freshly allocated, independent Ball[] copy
+        //   • UnsafeCopyBallsTo(Ball*)   – destination is unmanaged / pinned memory (interop)
+
+        /// <summary>
+        /// Copies all active balls into <paramref name="destination"/> starting at index 0.
+        /// Uses <see cref="Array.Copy"/> which performs a single native block-copy for
+        /// blittable structs — no per-element overhead.
+        /// </summary>
+        /// <param name="destination">Target array; must have length ≥ <see cref="BallCount"/>.</param>
+        /// <example>
+        /// <code>
+        /// // Snapshot: new Ball[] → Ball[]
+        /// var buf = new Ball[world.BallCount];
+        /// world.CopyBallsTo(buf);
+        /// </code>
+        /// </example>
+        public void CopyBallsTo(Ball[] destination)
+        {
+            // Array.Copy resolves to a single native memcpy for blittable element types.
+            // Far cheaper than: for (int i = 0; i < BallCount; i++) destination[i] = _balls[i];
+            Array.Copy(_balls, 0, destination, 0, BallCount);
+        }
+
+        /// <summary>
+        /// Copies all active balls into <paramref name="destination"/>.
+        /// <see cref="Span{T}.CopyTo"/> is JIT-lowered to a memcpy intrinsic, making this the
+        /// preferred path when the caller already holds a <see cref="Span{T}"/> — for example
+        /// from <c>stackalloc Ball[n]</c> or a rented array.
+        /// </summary>
+        /// <param name="destination">Span of length ≥ <see cref="BallCount"/>.</param>
+        /// <example>
+        /// <code>
+        /// // Zero-allocation temporary buffer on the stack (safe for ≤ 16 balls):
+        /// Span&lt;Ball&gt; buffer = stackalloc Ball[16];
+        /// world.CopyBallsTo(buffer);
+        ///
+        /// // Ball[] → Span&lt;Ball&gt; (slice of a larger array):
+        /// Ball[] pool = new Ball[32];
+        /// world.CopyBallsTo(new Span&lt;Ball&gt;(pool, 0, world.BallCount));
+        /// </code>
+        /// </example>
+        public void CopyBallsTo(Span<Ball> destination)
+        {
+            // GetBallsSpan() returns a Span over [0..BallCount-1].
+            // Span.CopyTo is a single JIT-intrinsified call — equivalent to Buffer.BlockCopy
+            // but type-safe and allocation-free.
+            GetBallsSpan().CopyTo(destination);
+        }
+
+        /// <summary>
+        /// Allocates a new <c>Ball[]</c> of exactly <see cref="BallCount"/> elements and
+        /// copies the active balls into it via <see cref="Array.Copy"/>.
+        /// Use this when you need a stable, independent snapshot (e.g. for AI rollout).
+        /// Only one heap allocation is made; no per-element overhead.
+        /// </summary>
+        /// <returns>A freshly allocated array containing a copy of the active balls.</returns>
+        /// <example>
+        /// <code>
+        /// // Efficient new Ball[] snapshot:
+        /// Ball[] snapshot = world.SnapshotBalls();
+        /// </code>
+        /// </example>
+        public Ball[] SnapshotBalls()
+        {
+            var snapshot = new Ball[BallCount];
+            // Array.Copy performs a block copy; for blittable structs this is equivalent to
+            // Buffer.BlockCopy but preserves type safety without requiring unsafe code.
+            Array.Copy(_balls, snapshot, BallCount);
+            return snapshot;
+        }
+
+        /// <summary>
+        /// Copies all active balls to an unmanaged memory block pointed to by
+        /// <paramref name="destination"/> using <see cref="Unsafe.CopyBlock"/>.
+        /// The caller must guarantee that the destination buffer is at least
+        /// <c>BallCount * sizeof(Ball)</c> bytes.
+        /// </summary>
+        /// <remarks>
+        /// This is the fastest available copy path (no bounds checks, no GC involvement)
+        /// and is intended for native/interop scenarios (e.g. passing ball state to a
+        /// native physics engine or a GPU compute buffer).
+        /// Prefer <see cref="CopyBallsTo(Span{Ball})"/> for managed callers.
+        /// </remarks>
+        /// <example>
+        /// <code>
+        /// // Copy ball state directly into a pinned managed array:
+        /// Ball[] nativeBuf = new Ball[world.BallCount];
+        /// fixed (Ball* dst = nativeBuf)
+        ///     world.UnsafeCopyBallsTo(dst);
+        /// </code>
+        /// </example>
+        public unsafe void UnsafeCopyBallsTo(Ball* destination)
+        {
+            if (BallCount == 0) return;
+            // Pin the source array to obtain a stable pointer, then use Unsafe.CopyBlock
+            // for a raw byte-level block copy.  sizeof(Ball) is a compile-time constant
+            // for unmanaged structs; multiplying by BallCount always fits in a uint for
+            // any realistic ball count (≤ ~16 million before overflow).
+            fixed (Ball* src = _balls)
+            {
+                Unsafe.CopyBlock(destination, src, (uint)(BallCount * sizeof(Ball)));
+            }
+        }
 
         public IReadOnlyList<Segment> TableSegments => _tableSegments;
         public IReadOnlyList<Pocket>  Pockets       => _pockets;

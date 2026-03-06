@@ -355,7 +355,10 @@ public class BilliardWorld : MonoBehaviour
     {
         for (int i = 0; i < _physicsWorld.BallCount; i++)
         {
-            Ball ball = _physicsWorld.Balls[i];
+            // Optimization: use 'ref' to read the array element directly instead of
+            // copying the ~148-byte Ball struct on each loop iteration.
+            // Ball is a large struct; per-iteration value copies are expensive in hot paths.
+            ref Ball ball = ref _physicsWorld.Balls[i];
             if(ball.IsPocketed)continue;
             var ballObj = ballDict[ball.Id];
             var ballShadowObj = ballShadowDict[ball.Id];
@@ -377,7 +380,8 @@ public class BilliardWorld : MonoBehaviour
     {
         for (int i = 0; i < _physicsWorld.BallCount; i++)
         {
-            Ball b = _physicsWorld.Balls[i];
+            // Optimization: ref avoids copying the large Ball struct on each iteration.
+            ref Ball b = ref _physicsWorld.Balls[i];
             if (!b.IsPocketed && !b.IsMotionless) return false;
         }
         return true;
