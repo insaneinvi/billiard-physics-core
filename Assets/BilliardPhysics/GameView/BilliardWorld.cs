@@ -218,6 +218,8 @@ public class BilliardWorld : MonoBehaviour
         };
         _physicsWorld = new();
         _physicsWorld.OnBallPocketed += OnBallPocketedHandler;
+        if (ballDropController != null)
+            ballDropController.BindPhysicsWorld(_physicsWorld);
         foreach (var tableSegment in tableSegments)
         {
             tableSegment.Restitution = BilliardsPhysicsDefaults.Segment_Restitution;
