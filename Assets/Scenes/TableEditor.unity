@@ -862,8 +862,8 @@ MonoBehaviour:
   EnableOutline: 1
   OutlineColor: {r: 0, g: 0, b: 0, a: 1}
   OutlineExtraWidth: 0.02
-  V0: 1
-  ScaleFactor: 1
+  V0: 10
+  ScaleFactor: 10
 --- !u!4 &612885782
 Transform:
   m_ObjectHideFlags: 0
@@ -1160,6 +1160,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   RollSpeed: 6
+  originScale: 0.5715
 --- !u!4 &957852302
 Transform:
   m_ObjectHideFlags: 0

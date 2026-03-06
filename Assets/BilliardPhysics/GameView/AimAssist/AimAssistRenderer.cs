@@ -18,7 +18,10 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 using System.Collections.Generic;
+using System.Numerics;
 using UnityEngine;
+using Vector2 = UnityEngine.Vector2;
+using Vector3 = UnityEngine.Vector3;
 
 namespace BilliardPhysics.AimAssist
 {
@@ -227,6 +230,39 @@ namespace BilliardPhysics.AimAssist
             }
         }
 
+        private void SimpleSimulatorAimDirection(Vector2 dir2D,HitResult hit, out Vector2 v1After, out Vector2 v2After)
+        {
+            Vector2 n = (hit.PHit - hit.TargetBallCenter).normalized;
+
+            float   speed  = Mathf.Max(V0, MinSpeed);
+            Vector2 v1     = dir2D * speed;
+            float   vn     = Vector2.Dot(v1, n);
+            v1After = v1 - vn * n;
+            v2After = vn * n;
+        }
+
+        private void PhysicsSimulatorAimDirection(Vector2 dir2D, HitResult hit, out Vector2 v1after, out Vector2 v2after)
+        {
+            var ball1 = new Ball(1)
+            {
+                Position = new FixVec2(Fix64.FromFloat(hit.PHit.x), Fix64.FromFloat(hit.PHit.y)),
+                Radius = BilliardsPhysicsDefaults.Ball_Radius,
+                Mass = BilliardsPhysicsDefaults.Ball_Mass,
+                LinearVelocity = new FixVec2(Fix64.FromFloat(dir2D.x*V0), Fix64.FromFloat(dir2D.y*V0))
+            };
+
+            var ball2 = new Ball(2)
+            {
+                Position = new FixVec2(Fix64.FromFloat(hit.TargetBallCenter.x), Fix64.FromFloat(hit.TargetBallCenter.y)),
+                Radius = BilliardsPhysicsDefaults.Ball_Radius,
+                Mass = BilliardsPhysicsDefaults.Ball_Mass,
+                LinearVelocity = FixVec2.Zero
+            };
+            ImpulseResolver.ResolveBallBall(ball1,ball2);
+            v1after = new Vector2(ball1.LinearVelocity.X.ToFloat(), ball1.LinearVelocity.Y.ToFloat());
+            v2after = new Vector2(ball2.LinearVelocity.X.ToFloat(), ball2.LinearVelocity.Y.ToFloat());
+        }
+
         // ── Public API ────────────────────────────────────────────────────────────
 
         /// <summary>
@@ -284,23 +320,10 @@ namespace BilliardPhysics.AimAssist
 
             // ── 3. Post-collision lines (ball-ball only) ──────────────────────────
             if (!hit.IsBallBall) return;
-
-            // Collision normal: unit vector pointing from target-ball centre to P_hit.
-            Vector2 n = (hit.PHit - hit.TargetBallCenter).normalized;
-
-            // Cue-ball velocity before collision.
-            float   speed  = Mathf.Max(V0, MinSpeed);
-            Vector2 v1     = dir2D * speed;
-
-            // Component of v1 along the collision axis.
-            float   vn     = Vector2.Dot(v1, n);
-
-            // Elastic equal-mass collision formulas (no spin / friction).
-            // v1_after = v1 − vn·n  (perpendicular component retained by cue ball)
-            // v2_after = vn·n       (normal component transferred to target ball)
-            Vector2 v1After = v1 - vn * n;
-            Vector2 v2After = vn * n;
-
+            Vector2 v1After, v2After;
+            
+            PhysicsSimulatorAimDirection(dir2D, hit, out v1After, out v2After);
+            
             // Draw cue-ball post-collision line from P_hit.
             Vector2 cueBallEnd = hit.PHit + v1After * ScaleFactor;
             DrawLineWithOutline(_cueBallPostLine, _cueBallPostLineOutline,

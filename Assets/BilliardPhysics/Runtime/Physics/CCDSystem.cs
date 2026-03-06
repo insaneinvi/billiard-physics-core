@@ -213,7 +213,6 @@ namespace BilliardPhysics
                 if (vn >= Fix64.Zero) continue;  // moving away from or parallel to sub-segment
 
                 Fix64 dist = FixVec2.Dot(ball.Position - segStart, n);
-
                 // Compute candidate TOI.  When dist ≤ ball.Radius the ball surface is
                 // already touching or inside the wall — this covers both the "surface
                 // penetrating" case (0 ≤ dist < ball.Radius, t < 0) and the "ball centre
@@ -222,8 +221,7 @@ namespace BilliardPhysics
                 // Clamp t to zero and resolve immediately, mirroring the analogous guard
                 // in SweptCircleCircle for already-overlapping balls.
                 Fix64 t = (dist - ball.Radius) / (-vn);
-                if (t < Fix64.Zero) t = Fix64.Zero;
-                if (t > dt) continue;
+                if (t < Fix64.Zero || t > dt) continue;
 
                 // Check if hit point falls within sub-segment extents.
                 FixVec2 hitPos = ball.Position + ball.LinearVelocity * t;
