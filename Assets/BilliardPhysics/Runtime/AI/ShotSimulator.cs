@@ -28,10 +28,10 @@ namespace BilliardPhysics.AI
         public ShotResult Simulate(PhysicsWorld2D world, TableState state, Shot shot, int cueBallId)
         {
             // 1. Save the current world state so we can restore it after simulation.
-            SavedBall[] saved = SaveBalls(world.Balls);
+            SavedBall[] saved = SaveBalls(world.Balls, world.BallCount);
 
             // 2. Apply the snapshot values to the world's balls.
-            RestoreFromSnapshot(world.Balls, state);
+            RestoreFromSnapshot(world.Balls, world.BallCount, state);
 
             // 3. Subscribe to pocket events to record which balls are pocketed.
             var pocketedIds = new List<int>();
@@ -39,18 +39,18 @@ namespace BilliardPhysics.AI
             world.OnBallPocketed += handler;
 
             // 4. Apply the cue strike to the cue ball.
-            Ball cueBall = FindBall(world.Balls, cueBallId);
-            if (cueBall != null)
+            int cueBallIdx = FindBallIndex(world.Balls, world.BallCount, cueBallId);
+            if (cueBallIdx >= 0)
             {
-                world.ApplyCueStrike(cueBall, shot.Direction, shot.Strength, shot.SpinX, shot.SpinY);
+                world.ApplyCueStrike(world.Balls[cueBallIdx], shot.Direction, shot.Strength, shot.SpinX, shot.SpinY);
                 // Explicitly flag the cue ball as moving so the motionless check
                 // fires correctly on the very first pass through the loop below.
-                cueBall.IsMotionless = false;
+                world.Balls[cueBallIdx].IsMotionless = false;
             }
 
             // 5. Step until all balls are still or the step limit is reached.
             int steps = 0;
-            while (!AreAllBallsMotionless(world.Balls) && steps < MaxSimSteps)
+            while (!AreAllBallsMotionless(world.Balls, world.BallCount) && steps < MaxSimSteps)
             {
                 world.Step();
                 steps++;
@@ -62,7 +62,7 @@ namespace BilliardPhysics.AI
             bool       cueBallPocketed = pocketedIds.Contains(cueBallId);
 
             // 7. Restore the world to its original state.
-            RestoreFromSaved(world.Balls, saved);
+            RestoreFromSaved(world.Balls, world.BallCount, saved);
 
             return new ShotResult(stateAfter, pocketedIds.AsReadOnly(), cueBallPocketed, steps);
         }
@@ -85,10 +85,10 @@ namespace BilliardPhysics.AI
             public bool    IsPocketed;
         }
 
-        private static SavedBall[] SaveBalls(IReadOnlyList<Ball> balls)
+        private static SavedBall[] SaveBalls(Ball[] balls, int ballCount)
         {
-            var saved = new SavedBall[balls.Count];
-            for (int i = 0; i < balls.Count; i++)
+            var saved = new SavedBall[ballCount];
+            for (int i = 0; i < ballCount; i++)
             {
                 Ball b = balls[i];
                 saved[i] = new SavedBall
@@ -105,52 +105,52 @@ namespace BilliardPhysics.AI
             return saved;
         }
 
-        private static void RestoreFromSaved(IReadOnlyList<Ball> balls, SavedBall[] saved)
+        private static void RestoreFromSaved(Ball[] balls, int ballCount, SavedBall[] saved)
         {
             foreach (SavedBall s in saved)
             {
-                Ball b = FindBall(balls, s.Id);
-                if (b == null) continue;
-                b.Position            = s.Position;
-                b.LinearVelocity      = s.LinearVelocity;
-                b.AngularVelocity     = s.AngularVelocity;
-                b.LastAngularVelocity = s.LastAngularVelocity;
-                b.IsMotionless        = s.IsMotionless;
-                b.IsPocketed          = s.IsPocketed;
+                int idx = FindBallIndex(balls, ballCount, s.Id);
+                if (idx < 0) continue;
+                balls[idx].Position            = s.Position;
+                balls[idx].LinearVelocity      = s.LinearVelocity;
+                balls[idx].AngularVelocity     = s.AngularVelocity;
+                balls[idx].LastAngularVelocity = s.LastAngularVelocity;
+                balls[idx].IsMotionless        = s.IsMotionless;
+                balls[idx].IsPocketed          = s.IsPocketed;
             }
         }
 
-        private static void RestoreFromSnapshot(IReadOnlyList<Ball> balls, TableState state)
+        private static void RestoreFromSnapshot(Ball[] balls, int ballCount, TableState state)
         {
             foreach (BallState bs in state.Balls)
             {
-                Ball b = FindBall(balls, bs.Id);
-                if (b == null) continue;
-                b.Position        = bs.Position;
-                b.LinearVelocity  = bs.Velocity;
-                b.AngularVelocity = bs.Angular;
-                b.IsMotionless    = bs.IsMotionless;
-                b.IsPocketed      = bs.IsPocketed;
+                int idx = FindBallIndex(balls, ballCount, bs.Id);
+                if (idx < 0) continue;
+                balls[idx].Position        = bs.Position;
+                balls[idx].LinearVelocity  = bs.Velocity;
+                balls[idx].AngularVelocity = bs.Angular;
+                balls[idx].IsMotionless    = bs.IsMotionless;
+                balls[idx].IsPocketed      = bs.IsPocketed;
             }
         }
 
-        private static bool AreAllBallsMotionless(IReadOnlyList<Ball> balls)
+        private static bool AreAllBallsMotionless(Ball[] balls, int ballCount)
         {
             Fix64 eps2 = MotionSimulator.Epsilon * MotionSimulator.Epsilon;
-            foreach (Ball b in balls)
+            for (int i = 0; i < ballCount; i++)
             {
-                if (b.IsPocketed) continue;
-                if (b.LinearVelocity.SqrMagnitude  >= eps2) return false;
-                if (b.AngularVelocity.SqrMagnitude >= eps2) return false;
+                if (balls[i].IsPocketed) continue;
+                if (balls[i].LinearVelocity.SqrMagnitude  >= eps2) return false;
+                if (balls[i].AngularVelocity.SqrMagnitude >= eps2) return false;
             }
             return true;
         }
 
-        private static Ball FindBall(IReadOnlyList<Ball> balls, int id)
+        private static int FindBallIndex(Ball[] balls, int ballCount, int id)
         {
-            foreach (Ball b in balls)
-                if (b.Id == id) return b;
-            return null;
+            for (int i = 0; i < ballCount; i++)
+                if (balls[i].Id == id) return i;
+            return -1;
         }
     }
 }
