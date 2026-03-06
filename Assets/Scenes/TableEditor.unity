@@ -862,8 +862,8 @@ MonoBehaviour:
   EnableOutline: 1
   OutlineColor: {r: 0, g: 0, b: 0, a: 1}
   OutlineExtraWidth: 0.02
-  V0: 10
-  ScaleFactor: 10
+  V0: 1
+  ScaleFactor: 1
 --- !u!4 &612885782
 Transform:
   m_ObjectHideFlags: 0

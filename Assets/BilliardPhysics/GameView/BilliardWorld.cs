@@ -103,8 +103,6 @@ public class BilliardWorld : MonoBehaviour
 
     private void cueBallSpinHandler(Vector2 delta)
     {
-        Debug.Log("-------------------->");
-        Debug.Log(delta);
         spinX = -BilliardsPhysicsDefaults.SpinParam * Fix64.FromFloat(delta.x);
         spinY = BilliardsPhysicsDefaults.SpinParam * Fix64.FromFloat(delta.y);
     }
