@@ -12,7 +12,7 @@ namespace BilliardPhysics
     /// <code>
     ///   var debug = new PhysicsWorld2DDebug();
     ///   debug.SetTableGeometry(world.TableSegments, world.Pockets);
-    ///   debug.SetBalls(world.Balls);
+    ///   debug.SetBalls(world.Balls, world.BallCount);
     ///   debug.SetDebug(true);
     ///   // …when done:
     ///   debug.SetDebug(false);
@@ -32,7 +32,12 @@ namespace BilliardPhysics
 
         private IReadOnlyList<Segment> _tableSegments;
         private IReadOnlyList<Pocket>  _pockets;
-        private IReadOnlyList<Ball>    _balls;
+        // Ball[] + count pair so the debug renderer only draws valid balls.
+        // Ball is now a struct stored in an array; we hold a reference to the array
+        // and the count at the time SetBalls was called.  If the array is replaced
+        // (auto-expand) the debug view will need to call SetBalls again.
+        private Ball[] _balls;
+        private int    _ballCount;
 
         // ── Public API ────────────────────────────────────────────────────────────
 
@@ -72,16 +77,15 @@ namespace BilliardPhysics
         }
 
         /// <summary>
-        /// Stores a reference to the ball list to draw each frame.
-        /// Each ball is drawn as a circle at <see cref="Ball.Position"/> with radius
-        /// <see cref="Ball.Radius"/>.
-        /// Passing <c>null</c> or an empty list is safe and simply clears that layer.
-        /// No copy is made – the caller's list is referenced directly to avoid
-        /// per-frame allocations.
+        /// Stores a reference to the ball array and the number of valid balls to draw.
+        /// Only indices [0..<paramref name="count"/>-1] are iterated; the rest are ignored.
+        /// Passing <c>null</c> or count = 0 clears the ball layer.
+        /// No deep copy is made – the caller's array is referenced directly.
         /// </summary>
-        public void SetBalls(IReadOnlyList<Ball> balls)
+        public void SetBalls(Ball[] balls, int count)
         {
-            _balls = balls;
+            _balls      = balls;
+            _ballCount  = count;
         }
 
         // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -134,10 +138,10 @@ namespace BilliardPhysics
             if (_balls != null)
             {
                 GL.Color(s_ballColor);
-                foreach (Ball ball in _balls)
+                for (int i = 0; i < _ballCount; i++)
                 {
-                    if (!ball.IsPocketed)
-                        DrawCircleGL(ball.Position, ball.Radius);
+                    if (!_balls[i].IsPocketed)
+                        DrawCircleGL(_balls[i].Position, _balls[i].Radius);
                 }
             }
 

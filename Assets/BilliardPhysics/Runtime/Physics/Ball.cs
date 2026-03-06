@@ -1,6 +1,22 @@
 namespace BilliardPhysics
 {
-    public class Ball
+    // ── Design rationale ─────────────────────────────────────────────────────────
+    // Ball is a value type (struct) so that:
+    //   • A contiguous Ball[] array can be passed to Span<Ball> / MemoryMarshal for
+    //     zero-copy bulk reads by AI inference or physics simulation pipelines.
+    //   • Per-ball cache locality is preserved: all fields sit in one cache line.
+    //
+    // Blittability: all fields are unmanaged value types (int, bool, Fix64 = long,
+    // FixVec2 / FixVec3 = struct of Fix64), so Ball is fully blittable / unmanaged.
+    // MemoryMarshal.Cast<Ball, byte>() and similar operations are safe.
+    //
+    // Value-semantics hazard: because Ball is a struct, callers must be careful
+    // not to work with stale copies.  Physics methods (MotionSimulator.Step,
+    // ImpulseResolver, CueStrike.Apply) take 'ref Ball' to mutate in place.
+    // After PhysicsWorld2D.Step(), always read ball state from PhysicsWorld2D.Balls[i]
+    // rather than from a Ball value that was captured before the step.
+    // ──────────────────────────────────────────────────────────────────────────────
+    public struct Ball
     {
         // ── Identity ──────────────────────────────────────────────────────────────
         public int Id;
@@ -45,22 +61,34 @@ namespace BilliardPhysics
             Id     = id;
             Radius = radius;
             Mass   = mass;
-   
+
             // Moment of inertia for a solid sphere: I = (2/5) * m * r^2
             Fix64 two   = Fix64.From(2);
             Fix64 five  = Fix64.From(5);
             Inertia = two / five * mass * radius * radius;
 
             Restitution     = Fix64.From(95)  / Fix64.From(100);  // 0.95
-            SlidingFriction = Fix64.From(25)   / Fix64.From(100);   // 0.2
-            RollingFriction = Fix64.From(2)   / Fix64.From(100);  // 0.01
-            SpinFriction    = Fix64.From(10)   / Fix64.From(100);  // 0.05
+            SlidingFriction = Fix64.From(25)  / Fix64.From(100);  // 0.25
+            RollingFriction = Fix64.From(2)   / Fix64.From(100);  // 0.02
+            SpinFriction    = Fix64.From(10)  / Fix64.From(100);  // 0.10
+
+            // Zero-initialise remaining state fields (required for struct constructors
+            // that do not use a base-class initialiser).
+            Position            = FixVec2.Zero;
+            LinearVelocity      = FixVec2.Zero;
+            AngularVelocity     = FixVec3.Zero;
+            LastAngularVelocity = FixVec3.Zero;
+            IsMotionless        = false;
+            IsPocketed          = false;
         }
 
         /// <summary>Convenience constructor using standard radius and mass.</summary>
         public Ball(int id) : this(id, StandardRadius, StandardMass) { }
 
         /// <summary>Zeros velocity and angular velocity; marks ball as active.</summary>
+        // NOTE: Because Ball is a struct, calling this method on an array element
+        // (e.g. _balls[i].Reset()) modifies the element in place, which is correct.
+        // Calling it on a local copy will NOT affect any array or world state.
         public void Reset()
         {
             LinearVelocity  = FixVec2.Zero;

@@ -53,6 +53,7 @@ namespace BilliardPhysics.Tests
             world.AddBall(ball);
 
             world.Step();
+            ball = world.Balls[0]; // refresh struct copy from world (Ball is a value type)
 
             Assert.IsTrue(ball.IsPocketed, "Ball must be pocketed after Step.");
 

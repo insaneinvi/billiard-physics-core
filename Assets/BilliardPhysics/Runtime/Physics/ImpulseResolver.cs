@@ -19,9 +19,12 @@ namespace BilliardPhysics
         /// </summary>
         public static Fix64 CorrectionPercent = Fix64.From(8) / Fix64.From(10);  // 0.8
 
+        // NOTE: Ball is a struct; 'ref' is required for all mutation methods so that
+        // velocity and position changes propagate back to the array element or local variable.
+
         // ── Ball–ball collision ───────────────────────────────────────────────────
 
-        public static void ResolveBallBall(Ball a, Ball b)
+        public static void ResolveBallBall(ref Ball a, ref Ball b)
         {
             FixVec2 n = (b.Position - a.Position).Normalized;
 
@@ -118,8 +121,8 @@ namespace BilliardPhysics
         /// Delegates to the overload with <paramref name="segmentRestitution"/> = 1
         /// (backwards-compatible; behaves identically to the original method).
         /// </summary>
-        public static void ResolveBallCushion(Ball ball, FixVec2 hitNormal)
-            => ResolveBallCushion(ball, hitNormal, Fix64.One);
+        public static void ResolveBallCushion(ref Ball ball, FixVec2 hitNormal)
+            => ResolveBallCushion(ref ball, hitNormal, Fix64.One);
 
         /// <summary>
         /// Resolves a ball-cushion collision, blending the ball's own restitution
@@ -132,7 +135,7 @@ namespace BilliardPhysics
         /// Restitution of the struck <see cref="Segment"/> (0–1).
         /// Use <see cref="Segment.Restitution"/> from the TOI result.
         /// </param>
-        public static void ResolveBallCushion(Ball ball, FixVec2 hitNormal, Fix64 segmentRestitution)
+        public static void ResolveBallCushion(ref Ball ball, FixVec2 hitNormal, Fix64 segmentRestitution)
         {
             FixVec2 n = hitNormal;
 
