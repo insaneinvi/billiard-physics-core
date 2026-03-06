@@ -36,7 +36,10 @@ namespace BilliardPhysics
         /// During the sliding phase this is added to <see cref="Ball.SlidingFriction"/>
         /// so that the translation-to-rotation impulse is also proportionally larger.
         /// </param>
-        public static void Step(Ball ball, Fix64 dt)
+        // NOTE: Ball is a struct; 'ref' is required so that all field mutations
+        // (LinearVelocity, AngularVelocity, Position, IsMotionless) propagate back
+        // to the caller's storage (array element, local variable, etc.).
+        public static void Step(ref Ball ball, Fix64 dt)
         {
             if (ball.IsPocketed) return;
 

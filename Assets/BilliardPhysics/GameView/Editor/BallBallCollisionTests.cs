@@ -51,7 +51,7 @@ namespace BilliardPhysics.Tests
             float m   = a.Mass.ToFloat();
             float ke0 = KE(m, a) + KE(m, b);
 
-            ImpulseResolver.ResolveBallBall(a, b);
+            ImpulseResolver.ResolveBallBall(ref a, ref b);
 
             float ke1 = KE(m, a) + KE(m, b);
 
@@ -73,7 +73,7 @@ namespace BilliardPhysics.Tests
             float m   = a.Mass.ToFloat();
             float ke0 = KE(m, a) + KE(m, b);
 
-            ImpulseResolver.ResolveBallBall(a, b);
+            ImpulseResolver.ResolveBallBall(ref a, ref b);
 
             float ke1 = KE(m, a) + KE(m, b);
             float eps = ke0 * 0.001f;
@@ -95,7 +95,7 @@ namespace BilliardPhysics.Tests
 
             float speed0 = a.LinearVelocity.Magnitude.ToFloat();
 
-            ImpulseResolver.ResolveBallBall(a, b);
+            ImpulseResolver.ResolveBallBall(ref a, ref b);
 
             float speed1 = a.LinearVelocity.Magnitude.ToFloat();
 
@@ -114,7 +114,7 @@ namespace BilliardPhysics.Tests
 
             float speed0 = a.LinearVelocity.Magnitude.ToFloat();
 
-            ImpulseResolver.ResolveBallBall(a, b);
+            ImpulseResolver.ResolveBallBall(ref a, ref b);
 
             float speed1 = a.LinearVelocity.Magnitude.ToFloat();
             Assert.IsTrue(speed1 <= speed0 + 0.5f,
@@ -134,7 +134,7 @@ namespace BilliardPhysics.Tests
         {
             var (a, b) = MakeTouchingPair(vx: 300, vy: 200);
 
-            ImpulseResolver.ResolveBallBall(a, b);
+            ImpulseResolver.ResolveBallBall(ref a, ref b);
 
             // n still points from a to b after positional correction.
             FixVec2 n      = (b.Position - a.Position).Normalized;
@@ -162,7 +162,7 @@ namespace BilliardPhysics.Tests
             float vax0 = a.LinearVelocity.X.ToFloat();
             float vay0 = a.LinearVelocity.Y.ToFloat();
 
-            ImpulseResolver.ResolveBallBall(a, b);
+            ImpulseResolver.ResolveBallBall(ref a, ref b);
 
             Assert.AreEqual(vax0, a.LinearVelocity.X.ToFloat(), 0.001f,
                 "Separating ball-a Vx must be unchanged.");
@@ -189,7 +189,7 @@ namespace BilliardPhysics.Tests
             // Collision normal is +X, so tangential direction is +Y.
             float vay0 = a.LinearVelocity.Y.ToFloat();  // initial tangential speed of a
 
-            ImpulseResolver.ResolveBallBall(a, b);
+            ImpulseResolver.ResolveBallBall(ref a, ref b);
 
             float vay1 = a.LinearVelocity.Y.ToFloat();
 

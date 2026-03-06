@@ -330,12 +330,15 @@ namespace BilliardPhysics
 
         /// <summary>
         /// Finds the earliest collision within [0, dt].
+        /// <paramref name="balls"/> is the raw Ball array managed by PhysicsWorld2D;
+        /// only indices [0..<paramref name="ballCount"/>-1] are valid.
         /// When <paramref name="segmentGrid"/> is supplied the ball–cushion broadphase
         /// uses the grid to skip distant segments; otherwise every segment is tested
         /// (original brute-force behaviour, preserved for backwards compatibility).
         /// </summary>
         public static TOIResult FindEarliestCollision(
-            List<Ball>    balls,
+            Ball[]        balls,
+            int           ballCount,
             List<Segment> segments,
             List<Pocket>  pockets,
             Fix64         dt,
@@ -344,10 +347,10 @@ namespace BilliardPhysics
             TOIResult best = new TOIResult { Hit = false, TOI = dt };
 
             // Ball–ball pairs.
-            for (int i = 0; i < balls.Count; i++)
+            for (int i = 0; i < ballCount; i++)
             {
                 if (balls[i].IsPocketed) continue;
-                for (int j = i + 1; j < balls.Count; j++)
+                for (int j = i + 1; j < ballCount; j++)
                 {
                     if (balls[j].IsPocketed) continue;
 
@@ -378,7 +381,7 @@ namespace BilliardPhysics
             }
 
             // Ball–cushion pairs.
-            for (int i = 0; i < balls.Count; i++)
+            for (int i = 0; i < ballCount; i++)
             {
                 if (balls[i].IsPocketed) continue;
                 Ball ball = balls[i];
@@ -482,6 +485,25 @@ namespace BilliardPhysics
             }
 
             return best;
+        }
+
+        /// <summary>
+        /// Backward-compatibility overload for callers that use a <see cref="List{T}"/> of
+        /// balls (e.g. test helpers that pre-date the Ball[] migration).
+        /// <br/>
+        /// <b>NOTE:</b> This overload calls <see cref="List{T}.ToArray"/> which performs a
+        /// heap allocation.  For production code (called every simulation step) prefer the
+        /// <c>Ball[], int ballCount</c> overload with the array managed by
+        /// <see cref="PhysicsWorld2D"/> to avoid per-step garbage.
+        /// </summary>
+        public static TOIResult FindEarliestCollision(
+            List<Ball>    balls,
+            List<Segment> segments,
+            List<Pocket>  pockets,
+            Fix64         dt,
+            SegmentGrid   segmentGrid = null)
+        {
+            return FindEarliestCollision(balls.ToArray(), balls.Count, segments, pockets, dt, segmentGrid);
         }
     }
 }

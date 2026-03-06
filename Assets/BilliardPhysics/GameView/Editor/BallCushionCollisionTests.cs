@@ -86,12 +86,15 @@ namespace BilliardPhysics.Tests
             world.AddBall(ball);
             world.AddSegment(MakeRightWall(wallX.ToFloat()));
 
-            // Verify pre-collision pure rolling.
+            // Verify pre-collision pure rolling (local copy, not yet stepped).
             float slipBefore = ComputeSlip(ball);
             Assert.IsTrue(slipBefore <= MotionSimulator.Epsilon.ToFloat() + 1e-4f,
                 $"Pre-collision slip must be near zero, was {slipBefore:F6}");
 
             world.Step();
+
+            // After step, always read from the world — ball is a struct (value copy).
+            ball = world.Balls[0];
 
             // After the bounce the ball must be moving left (reflected).
             Assert.IsTrue(ball.LinearVelocity.X.ToFloat() < 0f,
@@ -103,13 +106,6 @@ namespace BilliardPhysics.Tests
                 $"Post-bounce slip must be near zero (rolling constraint), was {slipAfter:F6}");
         }
 
-        /// <summary>
-        /// After a pure-rolling cushion bounce, running several MotionSimulator.Step calls
-        /// must NOT bend the trajectory (post-bounce direction must remain constant).
-        ///
-        /// Without the fix the misaligned ω.X/Y drives a sliding-friction arc; the velocity
-        /// direction drifts away from the initial reflected direction within ~10 steps.
-        /// </summary>
         [Test]
         public void Step_PureRollingBallAfterBounce_DirectionStableAcrossMultipleSteps()
         {
@@ -126,6 +122,9 @@ namespace BilliardPhysics.Tests
             // Bounce.
             world.Step();
 
+            // Refresh from world after step.
+            ball = world.Balls[0];
+
             Assert.IsTrue(ball.LinearVelocity.X.ToFloat() < 0f,
                 "Ball must rebound before direction-stability check.");
 
@@ -138,7 +137,7 @@ namespace BilliardPhysics.Tests
 
             Fix64 dt = Fix64.One / Fix64.From(60);
             for (int i = 0; i < 20; i++)
-                MotionSimulator.Step(ball, dt);
+                MotionSimulator.Step(ref ball, dt);  // ball is a local copy here (no world)
 
             float dx1 = ball.LinearVelocity.X.ToFloat();
             float dy1 = ball.LinearVelocity.Y.ToFloat();
@@ -155,14 +154,6 @@ namespace BilliardPhysics.Tests
 
         // ── Sliding before collision: existing behaviour must be preserved ─────────
 
-        /// <summary>
-        /// When the ball is sliding (slip > Epsilon) before the cushion collision the
-        /// projection must NOT be applied.  The ball's pre-bounce ω.X/Y must be
-        /// forwarded to ResolveBallCushion unchanged (existing behaviour).
-        ///
-        /// We verify this by confirming that the post-bounce slip is non-zero when the
-        /// ball was clearly sliding before impact.
-        /// </summary>
         [Test]
         public void Step_SlidingBallHitsCushion_AngularVelocityNotProjected()
         {
@@ -187,23 +178,20 @@ namespace BilliardPhysics.Tests
             world.AddBall(ball);
             world.AddSegment(MakeRightWall(wallX.ToFloat()));
 
-            // Snapshot pre-bounce angular velocity to compare after step.
-            float omegaYBefore = ball.AngularVelocity.Y.ToFloat();
-
             world.Step();
+
+            // Refresh from world after step.
+            ball = world.Balls[0];
 
             // Ball must have bounced.
             Assert.IsTrue(ball.LinearVelocity.X.ToFloat() < 0f,
                 "Sliding ball must still rebound off the cushion.");
 
             // Post-bounce ω.Y must NOT be equal to v.X_new / R (the projection was not applied).
-            // Instead it should reflect the impulse-modified value (not the pure-rolling target).
             float vxAfter     = ball.LinearVelocity.X.ToFloat();
             float omegaYAfter = ball.AngularVelocity.Y.ToFloat();
             float pureRollingTarget = vxAfter / R.ToFloat();
 
-            // The projected value would equal pureRollingTarget; we expect them to differ
-            // because the projection must not have been applied.
             Assert.IsFalse(
                 System.Math.Abs(omegaYAfter - pureRollingTarget) < 0.01f,
                 $"Sliding ball: ω.Y must not be projected to pure-rolling target " +

@@ -258,7 +258,7 @@ namespace BilliardPhysics.AimAssist
                 Mass = BilliardsPhysicsDefaults.Ball_Mass,
                 LinearVelocity = FixVec2.Zero
             };
-            ImpulseResolver.ResolveBallBall(ball1,ball2);
+            ImpulseResolver.ResolveBallBall(ref ball1, ref ball2);
             v1after = new Vector2(ball1.LinearVelocity.X.ToFloat(), ball1.LinearVelocity.Y.ToFloat());
             v2after = new Vector2(ball2.LinearVelocity.X.ToFloat(), ball2.LinearVelocity.Y.ToFloat());
         }
@@ -390,8 +390,10 @@ namespace BilliardPhysics.AimAssist
             float     bestDist = MaxDistance;
 
             // ── Test vs other balls ───────────────────────────────────────────────
-            foreach (Ball ball in PhysicsWorld.Balls)
+            // Iterate only valid balls [0..BallCount-1]; Balls[] may have extra capacity.
+            for (int bi = 0; bi < PhysicsWorld.BallCount; bi++)
             {
+                Ball ball = PhysicsWorld.Balls[bi];
                 if (ball.IsPocketed) continue;
 
                 Vector2 ballPos = new Vector2(ball.Position.X.ToFloat(),
