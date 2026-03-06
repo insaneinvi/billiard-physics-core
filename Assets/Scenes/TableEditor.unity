@@ -1160,6 +1160,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   RollSpeed: 6
+  originScale: 0.5715
 --- !u!4 &957852302
 Transform:
   m_ObjectHideFlags: 0

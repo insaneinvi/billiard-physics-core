@@ -59,9 +59,12 @@ public class CueBallSpinSelector : MonoBehaviour, IPointerDownHandler, IDragHand
 
             circle.localPosition = localPoint;
             spinSmallCircle.localPosition = localPoint;
-
+            
+            Debug.Log(localPoint);
+            Debug.Log("==========================================="+cueBallRadius);
             // 发送归一化事件
             Vector2 normalized = localPoint / cueBallRadius; // x, y范围 -1 ~ 1
+            Debug.Log(normalized);
             onSpinChanged?.Invoke(normalized);
         }
     }

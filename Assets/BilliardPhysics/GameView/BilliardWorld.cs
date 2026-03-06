@@ -27,7 +27,11 @@ public class BilliardWorld : MonoBehaviour
     private Dictionary<int, GameObject> ballShadowDict;
     private Dictionary<int, Quaternion> _ballRotations;
 
-    private Ball cueBall;
+    // Index of the cue ball in _physicsWorld.Balls (always 0 since it is added first).
+    // We store the index rather than a Ball copy because Ball is a struct; a copy
+    // would become stale after PhysicsWorld2D.Step() mutates the array in place.
+    private const int CueBallIndex = 0;
+    private Vector2 _cueBallStartPosition;
     private PhysicsWorld2D _physicsWorld;
     private SegmentData dropBallRollPath;
     
@@ -62,7 +66,7 @@ public class BilliardWorld : MonoBehaviour
     {
         var debug = new PhysicsWorld2DDebug();
         debug.SetTableGeometry(_physicsWorld.TableSegments, _physicsWorld.Pockets);
-        debug.SetBalls(_physicsWorld.Balls);
+        debug.SetBalls(_physicsWorld.Balls, _physicsWorld.BallCount);
         debug.SetDebug(true);
         pDebug = debug; 
     }
@@ -214,6 +218,8 @@ public class BilliardWorld : MonoBehaviour
         };
         _physicsWorld = new();
         _physicsWorld.OnBallPocketed += OnBallPocketedHandler;
+        if (ballDropController != null)
+            ballDropController.BindPhysicsWorld(_physicsWorld);
         foreach (var tableSegment in tableSegments)
         {
             tableSegment.Restitution = BilliardsPhysicsDefaults.Segment_Restitution;
@@ -225,8 +231,12 @@ public class BilliardWorld : MonoBehaviour
             _physicsWorld.AddPocket(pocket);
         }
 
-        cueBall = new Ball(0, BilliardsPhysicsDefaults.Ball_Radius, BilliardsPhysicsDefaults.Ball_Mass);
+        // Create and add the cue ball.  Because Ball is a struct, we set the fields
+        // on a local copy and then pass it to AddBall; after that we always read the
+        // ball's live state from _physicsWorld.Balls[CueBallIndex].
+        var cueBall = new Ball(0, BilliardsPhysicsDefaults.Ball_Radius, BilliardsPhysicsDefaults.Ball_Mass);
         cueBall.Position = new FixVec2(Fix64.FromFloat(rackResult.CueBall.Position.x),  Fix64.FromFloat(rackResult.CueBall.Position.y));
+        _cueBallStartPosition = new Vector2(rackResult.CueBall.Position.x, rackResult.CueBall.Position.y);
         _physicsWorld.AddBall(cueBall);
         
         foreach (var ob in rackResult.ObjectBalls)
@@ -292,6 +302,9 @@ public class BilliardWorld : MonoBehaviour
         var cbml =  IsAllBallMotionless();
         if (!isAllBallMotionless && cbml)
         {
+            // Read the cue ball's current state directly from the physics array.
+            if (_physicsWorld.Balls[CueBallIndex].IsPocketed)
+                RespawnCueBall();
             UpdateAllBallsPositionInfo();
             UpdateCueState(true);
         }
@@ -300,10 +313,54 @@ public class BilliardWorld : MonoBehaviour
             UpdateAllBallsPositionInfo();
     }
 
+    /// <summary>
+    /// Resets the cue ball to its default starting position after being pocketed.
+    /// Cancels any ongoing drop/roll animation, un-pockets the ball in physics,
+    /// and re-activates its view GameObject.
+    /// </summary>
+    private void RespawnCueBall()
+    {
+        // Read the cue ball's current Id from the live physics array.
+        int cueBallId = _physicsWorld.Balls[CueBallIndex].Id;
+
+        // Cancel any ongoing pocket-drop or roll animation so it does not
+        // overwrite the respawn position via OnBallAnimationUpdate callbacks.
+        ballDropController.CancelBallAnimation(cueBallId);
+
+        // Reset physics state: clears IsPocketed, zeros velocities, sets IsMotionless = true.
+        // _balls[CueBallIndex].Reset() modifies the array element in place because
+        // array elements are lvalues; the struct instance method writes back correctly.
+        _physicsWorld.Balls[CueBallIndex].Reset();
+
+        // Place the cue ball at its default starting position.
+        _physicsWorld.Balls[CueBallIndex].Position = new FixVec2(
+            Fix64.FromFloat(_cueBallStartPosition.x),
+            Fix64.FromFloat(_cueBallStartPosition.y));
+
+        // Re-activate the ball's view GameObject and reset its visual state.
+        if (ballDict.TryGetValue(cueBallId, out GameObject ballObj))
+        {
+            ballObj.SetActive(true);
+            ballObj.transform.position = new Vector3(
+                _physicsWorld.Balls[CueBallIndex].Position.X.ToFloat(),
+                _physicsWorld.Balls[CueBallIndex].Position.Y.ToFloat(),
+                -BallRackHelper.HalfBallDiameter);
+            _ballRotations[cueBallId] = Quaternion.identity;
+            ballObj.transform.rotation = Quaternion.identity;
+        }
+
+        if (ballShadowDict.TryGetValue(cueBallId, out GameObject shadowObj))
+            shadowObj.SetActive(true);
+    }
+
     private void UpdateAllBallsPositionInfo()
     {
-        foreach (var ball in _physicsWorld.Balls)
+        for (int i = 0; i < _physicsWorld.BallCount; i++)
         {
+            // Optimization: use 'ref' to read the array element directly instead of
+            // copying the ~148-byte Ball struct on each loop iteration.
+            // Ball is a large struct; per-iteration value copies are expensive in hot paths.
+            ref Ball ball = ref _physicsWorld.Balls[i];
             if(ball.IsPocketed)continue;
             var ballObj = ballDict[ball.Id];
             var ballShadowObj = ballShadowDict[ball.Id];
@@ -323,9 +380,11 @@ public class BilliardWorld : MonoBehaviour
 
     private bool IsAllBallMotionless()
     {
-        foreach (var physicsWorldBall in _physicsWorld.Balls)
+        for (int i = 0; i < _physicsWorld.BallCount; i++)
         {
-            if (!physicsWorldBall.IsPocketed && !physicsWorldBall.IsMotionless) return false;
+            // Optimization: ref avoids copying the large Ball struct on each iteration.
+            ref Ball b = ref _physicsWorld.Balls[i];
+            if (!b.IsPocketed && !b.IsMotionless) return false;
         }
         return true;
     }
@@ -334,7 +393,9 @@ public class BilliardWorld : MonoBehaviour
     {
         if (!isAllBallMotionless) return;
         FixVec2 direction = new FixVec2(Fix64.FromFloat(aimController.cueDir.x), Fix64.FromFloat(aimController.cueDir.y)).Normalized;
-        _physicsWorld.ApplyCueStrike(cueBall, direction, hitStrength, spinX, spinY);
+        // Pass the cue ball's current snapshot by value; ApplyCueStrike looks it up
+        // by Id in the array and mutates the authoritative copy.
+        _physicsWorld.ApplyCueStrike(_physicsWorld.Balls[CueBallIndex], direction, hitStrength, spinX, spinY);
     }
 
     private void OnBallPocketedHandler(int pocketId,int ballId)

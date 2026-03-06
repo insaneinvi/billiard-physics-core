@@ -21,7 +21,9 @@ namespace BilliardPhysics
         /// In the Z-up frame (+Z away from table) this corresponds to a +Z offset,
         /// driving ω.X/ω.Y so that positive spinY produces forward rolling spin.
         /// </param>
-        public static void Apply(Ball ball, FixVec2 direction, Fix64 strength, Fix64 spinX, Fix64 spinY)
+        // NOTE: Ball is a struct; 'ref' ensures the velocity/angular-velocity changes
+        // are written back to the caller's variable (array element or local).
+        public static void Apply(ref Ball ball, FixVec2 direction, Fix64 strength, Fix64 spinX, Fix64 spinY)
         {
             // Normalize direction defensively.
             FixVec2 dir = direction.Normalized;

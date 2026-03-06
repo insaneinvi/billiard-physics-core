@@ -102,6 +102,9 @@ namespace BilliardPhysics.Tests
             for (int i = 0; i < 10; i++)
                 world.Step();
 
+            // Refresh struct copies from the world after step.
+            a = world.Balls[0];
+            b = world.Balls[1];
             Fix64 dist    = FixVec2.Distance(a.Position, b.Position);
             Fix64 radSum  = a.Radius + b.Radius;
             // Allow a small numerical tolerance.
@@ -172,7 +175,7 @@ namespace BilliardPhysics.Tests
             for (int i = 0; i < 60 && !pocketed; i++)
             {
                 world.Step();
-                pocketed = ball.IsPocketed;
+                pocketed = world.Balls[0].IsPocketed;
             }
 
             Assert.IsTrue(pocketed,
@@ -202,6 +205,7 @@ namespace BilliardPhysics.Tests
             world.AddBall(ball);
 
             world.Step();
+            ball = world.Balls[0]; // refresh struct from world after step
 
             Assert.IsTrue(ball.IsPocketed, "Ball at pocket center must be pocketed after Step.");
             Assert.AreEqual(FixVec2.Zero, ball.LinearVelocity,
@@ -233,7 +237,7 @@ namespace BilliardPhysics.Tests
             for (int i = 0; i < 60 && !pocketed; i++)
             {
                 world.Step();
-                pocketed = ball.IsPocketed;
+                pocketed = world.Balls[0].IsPocketed;
             }
 
             Assert.IsTrue(pocketed,
@@ -262,6 +266,7 @@ namespace BilliardPhysics.Tests
             world.AddBall(ball);
 
             world.Step();
+            ball = world.Balls[0];
 
             Assert.IsFalse(ball.IsPocketed,
                 "A ball at or above PocketSinkSpeedThreshold must not be captured immediately.");
@@ -285,6 +290,7 @@ namespace BilliardPhysics.Tests
             world.AddBall(ball);
 
             world.Step();
+            ball = world.Balls[0];
 
             Assert.IsTrue(ball.IsPocketed,
                 "A ball just below PocketSinkSpeedThreshold (499 < 500) must be captured.");
@@ -330,6 +336,7 @@ namespace BilliardPhysics.Tests
             // Run several steps; ball should keep moving in +X (friction only).
             for (int i = 0; i < 10; i++)
                 world.Step();
+            ball = world.Balls[0];
 
             Assert.IsTrue(ball.LinearVelocity.X >= Fix64.Zero,
                 "Ball in open space must not spontaneously reverse direction.");
@@ -362,6 +369,7 @@ namespace BilliardPhysics.Tests
             for (int step = 0; step < 60; step++)
             {
                 world.Step();
+                ball = world.Balls[0]; // refresh struct from world
 
                 if (ball.IsMotionless) break;
 
@@ -403,6 +411,7 @@ namespace BilliardPhysics.Tests
             world.AddBall(ball);
 
             world.Step();
+            ball = world.Balls[0];
 
             // Ball must still travel in the +X direction without lateral deflection.
             Assert.IsTrue(ball.LinearVelocity.X >= Fix64.Zero,
@@ -430,7 +439,7 @@ namespace BilliardPhysics.Tests
 
             // Run enough steps for friction to build up rolling-direction spin.
             for (int i = 0; i < 100; i++)
-                MotionSimulator.Step(ball, dt);
+                MotionSimulator.Step(ref ball, dt);
 
             // ω.Y must be non-zero (table friction drives rolling around Y for +X motion).
             Assert.AreNotEqual(Fix64.Zero, ball.AngularVelocity.Y,
@@ -460,7 +469,7 @@ namespace BilliardPhysics.Tests
             var dt = Fix64.One / Fix64.From(60);
 
             // Run a step; friction coupling must transfer spin energy into linear motion.
-            MotionSimulator.Step(ball, dt);
+            MotionSimulator.Step(ref ball, dt);
 
             Assert.IsTrue(ball.LinearVelocity.X > Fix64.Zero,
                 "Top-spin (ω.Y < 0) on a static ball must produce positive X linear velocity.");
@@ -485,7 +494,7 @@ namespace BilliardPhysics.Tests
             Fix64 prevOmegaZ = ball.AngularVelocity.Z;
             for (int i = 0; i < 30; i++)
             {
-                MotionSimulator.Step(ball, dt);
+                MotionSimulator.Step(ref ball, dt);
 
                 // Linear velocity must remain exactly zero (side spin has no XY coupling).
                 Assert.AreEqual(FixVec2.Zero, ball.LinearVelocity,
@@ -524,7 +533,7 @@ namespace BilliardPhysics.Tests
 
             // Use segment restitution = 1.0; ball.Restitution is also 0.95 by default.
             // Effective e = Min(0.95, 1.0) = 0.95. After bounce vy should be +0.95 * 200.
-            ImpulseResolver.ResolveBallCushion(ball, normal, Fix64.One);
+            ImpulseResolver.ResolveBallCushion(ref ball, normal, Fix64.One);
 
             // After bounce the ball must be moving in +Y (away from cushion).
             Assert.IsTrue(ball.LinearVelocity.Y > Fix64.Zero,
@@ -552,12 +561,12 @@ namespace BilliardPhysics.Tests
             // Ball A bounces off segment with restitution = 1.
             var ballElastic = new Ball(0);
             ballElastic.LinearVelocity = initVel;
-            ImpulseResolver.ResolveBallCushion(ballElastic, normal, Fix64.One);
+            ImpulseResolver.ResolveBallCushion(ref ballElastic, normal, Fix64.One);
 
             // Ball B bounces off segment with restitution = 0.5.
             var ballInelastic = new Ball(0);
             ballInelastic.LinearVelocity = initVel;
-            ImpulseResolver.ResolveBallCushion(ballInelastic, normal,
+            ImpulseResolver.ResolveBallCushion(ref ballInelastic, normal,
                 Fix64.From(5) / Fix64.From(10));  // 0.5
 
             Fix64 speedElastic   = ballElastic.LinearVelocity.Magnitude;
@@ -585,7 +594,7 @@ namespace BilliardPhysics.Tests
             FixVec2 normal = new FixVec2(Fix64.Zero, Fix64.One);
 
             // segmentRestitution = 0; ball.Restitution = 0.95; effective e = Min(0.95, 0) = 0.
-            ImpulseResolver.ResolveBallCushion(ball, normal, Fix64.Zero);
+            ImpulseResolver.ResolveBallCushion(ref ball, normal, Fix64.Zero);
 
             // Normal velocity (Y) must be zero (inelastic: absorbed by cushion).
             Assert.AreEqual(Fix64.Zero, ball.LinearVelocity.Y,
@@ -621,6 +630,7 @@ namespace BilliardPhysics.Tests
             for (int i = 0; i < 30; i++)
             {
                 world.Step();
+                ball = world.Balls[0];
                 if (ball.LinearVelocity.X < Fix64.Zero)
                     break;
             }
@@ -642,14 +652,15 @@ namespace BilliardPhysics.Tests
 
         /// <summary>
         /// Helper: advances the ball until slip drops below Epsilon or maxSteps is reached.
+        /// Uses 'ref Ball' so that the caller's ball variable reflects the final state.
         /// </summary>
-        private static bool AdvanceToRolling(Ball ball, int maxSteps, Fix64 dt,
+        private static bool AdvanceToRolling(ref Ball ball, int maxSteps, Fix64 dt,
             out int stepsToRolling)
         {
             Fix64 eps = Fix64.One / Fix64.From(1000);
             for (int i = 0; i < maxSteps; i++)
             {
-                MotionSimulator.Step(ball, dt);
+                MotionSimulator.Step(ref ball, dt);
                 Fix64 vtX  = ball.LinearVelocity.X - ball.AngularVelocity.Y * ball.Radius;
                 Fix64 vtY  = ball.LinearVelocity.Y + ball.AngularVelocity.X * ball.Radius;
                 Fix64 slip = Fix64.Sqrt(vtX * vtX + vtY * vtY);
@@ -675,7 +686,7 @@ namespace BilliardPhysics.Tests
             ball.LinearVelocity = new FixVec2(Fix64.From(300), Fix64.Zero);
 
             var dt = Fix64.One / Fix64.From(60);
-            bool reached = AdvanceToRolling(ball, 6000, dt, out _);
+            bool reached = AdvanceToRolling(ref ball, 6000, dt, out _);
             Assert.IsTrue(reached, "Ball sliding in +X must eventually enter rolling.");
 
             if (ball.IsMotionless) return;
@@ -683,7 +694,7 @@ namespace BilliardPhysics.Tests
             Fix64 eps = Fix64.From(5) / Fix64.From(1000);  // 5× Epsilon tolerance
             for (int i = 0; i < 60; i++)
             {
-                MotionSimulator.Step(ball, dt);
+                MotionSimulator.Step(ref ball, dt);
                 if (ball.IsMotionless) break;
 
                 Fix64 vtX  = ball.LinearVelocity.X - ball.AngularVelocity.Y * ball.Radius;
@@ -706,7 +717,7 @@ namespace BilliardPhysics.Tests
             ball.LinearVelocity = new FixVec2(Fix64.Zero, Fix64.From(300));
 
             var dt = Fix64.One / Fix64.From(60);
-            bool reached = AdvanceToRolling(ball, 6000, dt, out _);
+            bool reached = AdvanceToRolling(ref ball, 6000, dt, out _);
             Assert.IsTrue(reached, "Ball sliding in +Y must eventually enter rolling.");
 
             if (ball.IsMotionless) return;
@@ -714,7 +725,7 @@ namespace BilliardPhysics.Tests
             Fix64 eps = Fix64.From(5) / Fix64.From(1000);
             for (int i = 0; i < 60; i++)
             {
-                MotionSimulator.Step(ball, dt);
+                MotionSimulator.Step(ref ball, dt);
                 if (ball.IsMotionless) break;
 
                 Fix64 vtX  = ball.LinearVelocity.X - ball.AngularVelocity.Y * ball.Radius;
@@ -739,7 +750,7 @@ namespace BilliardPhysics.Tests
             ball.LinearVelocity = new FixVec2(comp, comp);
 
             var dt = Fix64.One / Fix64.From(60);
-            bool reached = AdvanceToRolling(ball, 6000, dt, out _);
+            bool reached = AdvanceToRolling(ref ball, 6000, dt, out _);
             Assert.IsTrue(reached, "Ball sliding diagonally must eventually enter rolling.");
 
             if (ball.IsMotionless) return;
@@ -747,7 +758,7 @@ namespace BilliardPhysics.Tests
             Fix64 eps = Fix64.From(5) / Fix64.From(1000);
             for (int i = 0; i < 60; i++)
             {
-                MotionSimulator.Step(ball, dt);
+                MotionSimulator.Step(ref ball, dt);
                 if (ball.IsMotionless) break;
 
                 Fix64 vtX  = ball.LinearVelocity.X - ball.AngularVelocity.Y * ball.Radius;
@@ -775,7 +786,7 @@ namespace BilliardPhysics.Tests
             Assert.AreEqual(Fix64.Zero, ball.AngularVelocity.Y,
                 "Initial ω.Y must be zero (no spin at launch).");
 
-            bool reached = AdvanceToRolling(ball, 6000, dt, out _);
+            bool reached = AdvanceToRolling(ref ball, 6000, dt, out _);
             Assert.IsTrue(reached, "Ball must reach rolling state.");
 
             if (ball.IsMotionless) return;
@@ -784,7 +795,7 @@ namespace BilliardPhysics.Tests
             Fix64 tolAbs = Fix64.From(2) / Fix64.From(100);
             for (int i = 0; i < 60; i++)
             {
-                MotionSimulator.Step(ball, dt);
+                MotionSimulator.Step(ref ball, dt);
                 if (ball.IsMotionless) break;
 
                 Fix64 vX  = Fix64.Abs(ball.LinearVelocity.X);
@@ -814,7 +825,7 @@ namespace BilliardPhysics.Tests
             Fix64 strength = Fix64.From(10000);
             Fix64 spinY    = Fix64.One;
 
-            CueStrike.Apply(ball, dir, strength, Fix64.Zero, spinY);
+            CueStrike.Apply(ref ball, dir, strength, Fix64.Zero, spinY);
 
             Assert.IsTrue(ball.AngularVelocity.Y > Fix64.Zero,
                 "Top-spin cue strike in +X must produce ω.Y > 0 (Z-up convention).");
@@ -831,7 +842,7 @@ namespace BilliardPhysics.Tests
             Fix64 strength = Fix64.From(10000);
             Fix64 spinY    = -Fix64.One;
 
-            CueStrike.Apply(ball, dir, strength, Fix64.Zero, spinY);
+            CueStrike.Apply(ref ball, dir, strength, Fix64.Zero, spinY);
 
             Assert.IsTrue(ball.AngularVelocity.Y < Fix64.Zero,
                 "Back-spin cue strike in +X must produce ω.Y < 0 (Z-up convention).");
@@ -850,11 +861,11 @@ namespace BilliardPhysics.Tests
             FixVec2 dir    = new FixVec2(Fix64.One, Fix64.Zero);
 
             var ballNoSpin = new Ball(0);
-            CueStrike.Apply(ballNoSpin, dir, strength, Fix64.Zero, Fix64.Zero);
+            CueStrike.Apply(ref ballNoSpin, dir, strength, Fix64.Zero, Fix64.Zero);
 
             var ballTopSpin = new Ball(1);
             Fix64 spinY = Ball.StandardRadius / Fix64.From(2);
-            CueStrike.Apply(ballTopSpin, dir, strength, Fix64.Zero, spinY);
+            CueStrike.Apply(ref ballTopSpin, dir, strength, Fix64.Zero, spinY);
 
             Fix64 slipNoSpin = Fix64.Abs(
                 ballNoSpin.LinearVelocity.X
@@ -891,14 +902,14 @@ namespace BilliardPhysics.Tests
             FixVec2 dir = new FixVec2(Fix64.One, Fix64.Zero).Normalized;
             Fix64 strength = Fix64.From(300000);
 
-            CueStrike.Apply(ball, dir, strength, Fix64.Zero, Fix64.Zero);
+            CueStrike.Apply(ref ball, dir, strength, Fix64.Zero, Fix64.Zero);
 
             // Centre hit must start with no angular velocity.
             Assert.AreEqual(Fix64.Zero, ball.AngularVelocity.Y,
                 "Centre hit must not impart initial spin (ω.Y must be 0).");
 
             Fix64 dt = Fix64.One / Fix64.From(60);
-            bool reached = AdvanceToRolling(ball, 60, dt, out int steps);
+            bool reached = AdvanceToRolling(ref ball, 60, dt, out int steps);
 
             Assert.IsTrue(reached,
                 $"Ball must reach rolling within 60 steps (1 s at 60 Hz); " +
@@ -951,7 +962,7 @@ namespace BilliardPhysics.Tests
 
             Fix64 distBefore = FixVec2.Distance(a.Position, b.Position);
 
-            ImpulseResolver.ResolveBallBall(a, b);
+            ImpulseResolver.ResolveBallBall(ref a, ref b);
 
             Fix64 distAfter = FixVec2.Distance(a.Position, b.Position);
 
@@ -995,6 +1006,8 @@ namespace BilliardPhysics.Tests
             for (int i = 0; i < 5; i++)
                 world.Step();
 
+            a = world.Balls[0];
+            b = world.Balls[1];
             Fix64 dist      = FixVec2.Distance(a.Position, b.Position);
             Fix64 tolerance = Fix64.FromFloat(0.5f);
             Assert.IsTrue(dist >= radSum - tolerance,
@@ -1033,6 +1046,9 @@ namespace BilliardPhysics.Tests
             for (int i = 0; i < 10; i++)
                 world.Step();
 
+            a = world.Balls[0];
+            b = world.Balls[1];
+            c = world.Balls[2];
             Fix64 tolerance = Fix64.FromFloat(0.5f);
 
             Fix64 distAB = FixVec2.Distance(a.Position, b.Position);
@@ -1093,6 +1109,7 @@ namespace BilliardPhysics.Tests
             for (int step = 0; step < 300; step++)
             {
                 world.Step();
+                ball = world.Balls[0]; // refresh struct from world
                 if (ball.IsMotionless) break;
 
                 Assert.IsTrue(ball.Position.X >= -halfW && ball.Position.X <= halfW,
@@ -1122,6 +1139,7 @@ namespace BilliardPhysics.Tests
             world.AddBall(ball);
 
             world.Step();
+            ball = world.Balls[0];
 
             Assert.IsTrue(ball.IsPocketed,
                 "A slow ball (speed < threshold) inside the pocket area must be captured.");
@@ -1148,6 +1166,7 @@ namespace BilliardPhysics.Tests
             world.AddBall(ball);
 
             world.Step();
+            ball = world.Balls[0];
 
             Assert.IsFalse(ball.IsPocketed,
                 "A high-speed ball (speed >= threshold) must not be captured immediately.");
@@ -1255,8 +1274,13 @@ namespace BilliardPhysics.Tests
             Fix64 speedBefore = ball.LinearVelocity.Magnitude;
 
             // Run until ball hits rim and bounces (or is pocketed).
-            for (int i = 0; i < 30 && !ball.IsPocketed; i++)
+            // After each step, refresh the struct copy from the world.
+            for (int i = 0; i < 30; i++)
+            {
                 world.Step();
+                ball = world.Balls[0];
+                if (ball.IsPocketed) break;
+            }
 
             // Either pocketed (speed dropped below threshold) or noticeably slower.
             bool energyAbsorbed = ball.IsPocketed ||
@@ -1313,6 +1337,7 @@ namespace BilliardPhysics.Tests
             // Run enough steps for ball A to pass by ball B completely.
             for (int i = 0; i < 5; i++)
                 world.Step();
+            ballB = world.Balls[1]; // refresh struct from world
 
             // Ball B must not have gained any meaningful velocity.
             // A threshold of 1 mm/s is orders of magnitude above Fix64 rounding noise
@@ -1404,7 +1429,7 @@ namespace BilliardPhysics.Tests
             Fix64   strength = Fix64.From(3200000);
             Fix64   spinX    = Ball.StandardRadius / Fix64.From(3);  // lateral english
             Fix64   spinY    = Ball.StandardRadius / Fix64.From(2);  // top-spin
-            CueStrike.Apply(cue, new FixVec2(Fix64.One, Fix64.Zero), strength, spinX, spinY);
+            CueStrike.Apply(ref cue, new FixVec2(Fix64.One, Fix64.Zero), strength, spinX, spinY);
 
             world.AddBall(cue);
             world.AddBall(target);
@@ -1412,6 +1437,8 @@ namespace BilliardPhysics.Tests
             // One step is sufficient: the CCD must detect and resolve the collision
             // before the cue ball exits the far side of the target.
             world.Step();
+            cue    = world.Balls[0]; // refresh struct from world
+            target = world.Balls[1];
 
             // Target must have gained velocity (it was hit, not tunnelled through).
             Assert.IsTrue(target.LinearVelocity.X > Fix64.Zero,
@@ -1510,12 +1537,13 @@ namespace BilliardPhysics.Tests
             Fix64 strength = Fix64.From(3200000);
             Fix64 spinX    = Ball.StandardRadius / Fix64.From(3);
             Fix64 spinY    = Ball.StandardRadius / Fix64.From(2);
-            CueStrike.Apply(ball, new FixVec2(Fix64.One, Fix64.Zero), strength, spinX, spinY);
+            CueStrike.Apply(ref ball, new FixVec2(Fix64.One, Fix64.Zero), strength, spinX, spinY);
 
             world.AddBall(ball);
 
             // One step must be enough: vertex is only 30 mm away at ~20 000 mm/s.
             world.Step();
+            ball = world.Balls[0]; // refresh struct from world
 
             // The ball must have been deflected by the vertex: either it bounced back
             // (vX ≤ 0) or its position stayed left of the segment (x ≤ 30 + radius).
@@ -1575,6 +1603,7 @@ namespace BilliardPhysics.Tests
             world.AddBall(ball);
 
             world.Step();
+            ball = world.Balls[0]; // refresh struct from world
 
             // The ball must NOT have tunnelled: either it was pocketed, bounced back
             // (velocity reversed), or its position was stopped before/at the rim.
@@ -1614,6 +1643,7 @@ namespace BilliardPhysics.Tests
             world.AddBall(ball);
 
             world.Step();
+            ball = world.Balls[0]; // refresh struct from world
 
             bool tunnelled = !ball.IsPocketed
                           && ball.Position.X > Fix64.From(300) + ball.Radius
@@ -1738,6 +1768,7 @@ namespace BilliardPhysics.Tests
             world.AddBall(ball);
 
             world.Step();
+            ball = world.Balls[0]; // refresh struct from world
 
             // Ball must have bounced back (negative X velocity) and must not be past the wall.
             Assert.IsTrue(ball.LinearVelocity.X <= Fix64.Zero,
@@ -1792,7 +1823,7 @@ namespace BilliardPhysics.Tests
             Fix64 strength = Fix64.From(50000);
             Fix64 spinX    = Ball.StandardRadius / Fix64.From(3);
             Fix64 spinY    = Ball.StandardRadius / Fix64.From(2);
-            CueStrike.Apply(cue, new FixVec2(Fix64.One, Fix64.Zero), strength, spinX, spinY);
+            CueStrike.Apply(ref cue, new FixVec2(Fix64.One, Fix64.Zero), strength, spinX, spinY);
 
             world.AddBall(cue);
             world.AddBall(target);
@@ -1800,6 +1831,8 @@ namespace BilliardPhysics.Tests
             // Run several physics steps to let the collision be fully resolved.
             for (int step = 0; step < 10; step++)
                 world.Step();
+            cue    = world.Balls[0]; // refresh struct from world
+            target = world.Balls[1];
 
             Fix64 tolerance = Fix64.FromFloat(0.5f);
 

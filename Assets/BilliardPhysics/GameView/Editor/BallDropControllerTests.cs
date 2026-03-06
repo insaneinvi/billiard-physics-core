@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Reflection;
 using NUnit.Framework;
 using BilliardPhysics;
 using BilliardPhysics.AniHelp;
@@ -51,6 +53,7 @@ namespace BilliardPhysics.Tests
             world.AddBall(ball);
 
             world.Step();
+            ball = world.Balls[0]; // refresh struct copy from world (Ball is a value type)
 
             Assert.IsTrue(ball.IsPocketed, "Ball must be pocketed after Step.");
 
@@ -327,6 +330,361 @@ namespace BilliardPhysics.Tests
             float wrongTime = PocketDropAniHelper.CalcDropMoveTime(ballDiameter, ballSpeed);
             Assert.AreNotEqual(wrongTime, moveTime,
                 "Using full diameter instead of actual distance must give a different (incorrect) result.");
+        }
+
+        // ── AdjustRollStartForOverlap: simultaneous pocketing ────────────────────
+
+        // Helpers to access BallDropController private state via reflection.
+        private static FieldInfo StoppedBallsField => typeof(BallDropController)
+            .GetField("_stoppedBalls", BindingFlags.NonPublic | BindingFlags.Instance);
+
+        private static MethodInfo AdjustMethod => typeof(BallDropController)
+            .GetMethod("AdjustRollStartForOverlap",
+                BindingFlags.NonPublic | BindingFlags.Instance,
+                null,
+                new[] { typeof(Vector3[]), typeof(float) },
+                null);
+
+        /// <summary>
+        /// When no existing ball is present on the path,
+        /// <c>AdjustRollStartForOverlap</c> must leave waypoints[0] unchanged.
+        /// </summary>
+        [Test]
+        public void AdjustRollStartForOverlap_NoExistingBalls_StartUnchanged()
+        {
+            var go = new GameObject();
+            try
+            {
+                var controller = go.AddComponent<BallDropController>();
+                var waypoints  = new[] { new Vector3(0f, 0f, 0f), new Vector3(5f, 0f, 0f) };
+
+                AdjustMethod.Invoke(controller, new object[] { waypoints, 0.28575f });
+
+                Assert.AreEqual(new Vector3(0f, 0f, 0f), waypoints[0],
+                    "Start must not change when no ball occupies the path start.");
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        /// <summary>
+        /// When a stopped ball already sits at the path start,
+        /// <c>AdjustRollStartForOverlap</c> must push the new start backwards
+        /// (opposite to the path forward direction) by exactly the contact distance.
+        /// This replicates the fix for two balls pocketed simultaneously.
+        /// </summary>
+        [Test]
+        public void AdjustRollStartForOverlap_StoppedBallAtStart_NewStartShiftedBehind()
+        {
+            var go = new GameObject();
+            try
+            {
+                var controller = go.AddComponent<BallDropController>();
+
+                float selfRadius    = 0.28575f;
+                float stoppedRadius = 0.28575f;
+                float contactDist   = selfRadius + stoppedRadius;
+
+                // Simulate a stopped ball sitting exactly at the path start.
+                var stoppedBalls = StoppedBallsField.GetValue(controller)
+                    as List<(Vector3 pos, float radius)>;
+                stoppedBalls.Add((new Vector3(0f, 0f, 0f), stoppedRadius));
+
+                // Path goes in the +X direction.
+                var waypoints = new[] { new Vector3(0f, 0f, 0f), new Vector3(5f, 0f, 0f) };
+
+                AdjustMethod.Invoke(controller, new object[] { waypoints, selfRadius });
+
+                // Expected: one contact-length behind the stopped ball along the -X axis.
+                var expected = new Vector3(-contactDist, 0f, 0f);
+                Assert.AreEqual(expected.x, waypoints[0].x, 1e-4f,
+                    "X: start must be shifted one contact-length behind the stopped ball.");
+                Assert.AreEqual(expected.y, waypoints[0].y, 1e-4f,
+                    "Y: start must not change in the cross-path direction.");
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        /// <summary>
+        /// When three balls are stopped at the path start (simulating three simultaneous
+        /// pocketings), each successive call must shift the new start one additional
+        /// contact-length behind the previous, so the three final positions are all
+        /// separated by at least the contact distance.
+        /// </summary>
+        [Test]
+        public void AdjustRollStartForOverlap_ThreeStoppedBallsAtStart_StacksCorrectly()
+        {
+            var go = new GameObject();
+            try
+            {
+                var controller = go.AddComponent<BallDropController>();
+
+                float radius      = 0.28575f;
+                float contactDist = radius * 2f;
+
+                var stoppedBalls = StoppedBallsField.GetValue(controller)
+                    as List<(Vector3 pos, float radius)>;
+
+                // Simulate two balls already stopped at the path start.
+                stoppedBalls.Add((new Vector3(0f,            0f, 0f), radius));
+                stoppedBalls.Add((new Vector3(-contactDist,  0f, 0f), radius));
+
+                // Third ball tries to start at the same position.
+                var waypoints = new[] { new Vector3(0f, 0f, 0f), new Vector3(5f, 0f, 0f) };
+
+                AdjustMethod.Invoke(controller, new object[] { waypoints, radius });
+
+                // The third ball must be at least two contact-lengths behind waypoints[0].
+                Assert.Less(waypoints[0].x, -contactDist + 1e-4f,
+                    "Third ball must be pushed behind both existing stopped balls.");
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        // ── CancelBallAnimation: stops active drop ────────────────────────────────
+
+        private static FieldInfo ActiveDropsField => typeof(BallDropController)
+            .GetField("_activeDrops", BindingFlags.NonPublic | BindingFlags.Instance);
+
+        private static FieldInfo ActiveRollsField => typeof(BallDropController)
+            .GetField("_activeRolls", BindingFlags.NonPublic | BindingFlags.Instance);
+
+        private static MethodInfo TickRollsMethod => typeof(BallDropController)
+            .GetMethod("TickRolls", BindingFlags.NonPublic | BindingFlags.Instance);
+
+        /// <summary>
+        /// <see cref="BallDropController.CancelBallAnimation"/> must remove the entry from
+        /// the active-drop list so the drop animation stops immediately and no further
+        /// <see cref="BallDropController.OnBallAnimationUpdate"/> callbacks are fired.
+        /// </summary>
+        [Test]
+        public void CancelBallAnimation_ActiveDrop_IsRemovedFromActiveDrops()
+        {
+            var go = new GameObject();
+            try
+            {
+                var controller = go.AddComponent<BallDropController>();
+
+                // Set up a pocketed ball and start a drop animation.
+                var ball = new Ball(7);
+                ball.Position        = new FixVec2(Fix64.FromFloat(-1f), Fix64.Zero);
+                ball.LinearVelocity  = new FixVec2(Fix64.FromFloat(2f),  Fix64.Zero);
+                ball.IsPocketed      = true;
+                ball.LastAngularVelocity = FixVec3.Zero;
+                ball.AngularVelocity     = FixVec3.Zero;
+
+                controller.OnBallPocketed(ball, new Vector3(0f, 0f, 0f), null);
+
+                var activeDrops = ActiveDropsField.GetValue(controller) as System.Collections.ICollection;
+                Assert.AreEqual(1, activeDrops.Count,
+                    "One drop must be active after OnBallPocketed.");
+
+                // Cancel the animation and verify it was removed.
+                controller.CancelBallAnimation(ball.Id);
+
+                Assert.AreEqual(0, activeDrops.Count,
+                    "No drops must remain after CancelBallAnimation.");
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        /// <summary>
+        /// <see cref="BallDropController.CancelBallAnimation"/> must also remove any active
+        /// roll entry for the ball, preventing further position updates after cancellation.
+        /// </summary>
+        [Test]
+        public void CancelBallAnimation_ActiveRoll_IsRemovedFromActiveRolls()
+        {
+            var go = new GameObject();
+            try
+            {
+                var controller = go.AddComponent<BallDropController>();
+
+                var ball = new Ball(5);
+                ball.IsPocketed = true;
+
+                // Inject an ActiveRoll directly into the controller's internal list.
+                var activeRolls = ActiveRollsField.GetValue(controller)
+                    as List<ActiveRoll>;
+                activeRolls.Add(new ActiveRoll
+                {
+                    BallId          = ball.Id,
+                    BallRadius      = ball.Radius.ToFloat(),
+                    CurrentPosition = new Vector3(0f, 0f, 0f),
+                    Waypoints       = new[] { new Vector3(0f, 0f, 0f), new Vector3(5f, 0f, 0f) },
+                    SegIdx          = 0,
+                    SegT            = 0f,
+                    Speed           = 0.5f,
+                    Rotation        = Quaternion.identity,
+                });
+
+                Assert.AreEqual(1, activeRolls.Count,
+                    "One roll must be active before cancellation.");
+
+                controller.CancelBallAnimation(ball.Id);
+
+                Assert.AreEqual(0, activeRolls.Count,
+                    "No rolls must remain after CancelBallAnimation.");
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        /// <summary>
+        /// When a roll animation reaches the end waypoint, <see cref="BallDropController"/>
+        /// must invoke <see cref="BallDropController.OnBallHide"/> with the ball's ID so
+        /// the presentation layer can hide the ball.
+        ///
+        /// Regression test for the missing <c>OnBallHide</c> call in
+        /// <c>TickRolls</c> when the roll animation completes.
+        /// </summary>
+        [Test]
+        public void TickRolls_WhenRollCompletes_InvokesOnBallHide()
+        {
+            var go = new GameObject();
+            try
+            {
+                var controller = go.AddComponent<BallDropController>();
+
+                int hiddenBallId = -1;
+                controller.OnBallHide += id => hiddenBallId = id;
+
+                var ball = new Ball(3);
+                ball.IsPocketed = true;
+
+                // Inject an ActiveRoll with a short path (0.1 units at 0.5 u/s → 0.2 s to complete).
+                var activeRolls = ActiveRollsField.GetValue(controller)
+                    as List<ActiveRoll>;
+                activeRolls.Add(new ActiveRoll
+                {
+                    BallId          = ball.Id,
+                    BallRadius      = ball.Radius.ToFloat(),
+                    CurrentPosition = new Vector3(0f, 0f, 0f),
+                    Waypoints       = new[] { new Vector3(0f, 0f, 0f), new Vector3(0.1f, 0f, 0f) },
+                    SegIdx          = 0,
+                    SegT            = 0f,
+                    Speed           = 0.5f,
+                    Rotation        = Quaternion.identity,
+                });
+
+                // Advance with more than enough time to finish the roll.
+                TickRollsMethod.Invoke(controller, new object[] { 1.0f });
+
+                Assert.AreEqual(ball.Id, hiddenBallId,
+                    "OnBallHide must be invoked with the ball's ID when its roll animation completes.");
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        // ── Velocity sync: roll phase writes to PhysicsWorld2D.Balls[] ────────────
+
+        /// <summary>
+        /// When a roll animation starts, <c>SetBallRollingVelocity</c> (called from
+        /// <c>StartRoll</c> / <c>AdvanceRoll</c>) must write <see cref="Ball.LinearVelocity"/>
+        /// and <see cref="Ball.AngularVelocity"/> directly into the authoritative
+        /// <see cref="PhysicsWorld2D.Balls"/> array, not into a stale struct copy.
+        /// </summary>
+        [Test]
+        public void TickRolls_WhileRolling_VelocityIsWrittenToPhysicsWorldArray()
+        {
+            var go = new GameObject();
+            try
+            {
+                var controller = go.AddComponent<BallDropController>();
+
+                // Create and bind a physics world with the ball.
+                var world = new PhysicsWorld2D();
+                var ball  = new Ball(0); // AddBall assigns Id = 0
+                world.AddBall(ball);
+                controller.BindPhysicsWorld(world);
+
+                int   ballId     = world.Balls[0].Id;
+                float ballRadius = world.Balls[0].Radius.ToFloat();
+
+                // Inject an ActiveRoll that is partway through a path in the +X direction.
+                var activeRolls = ActiveRollsField.GetValue(controller) as List<ActiveRoll>;
+                activeRolls.Add(new ActiveRoll
+                {
+                    BallId          = ballId,
+                    BallRadius      = ballRadius,
+                    CurrentPosition = new Vector3(0f, 0f, 0f),
+                    Waypoints       = new[] { new Vector3(0f, 0f, 0f), new Vector3(5f, 0f, 0f) },
+                    SegIdx          = 0,
+                    SegT            = 0f,
+                    Speed           = 0.5f,
+                    Rotation        = Quaternion.identity,
+                });
+
+                // Tick one frame (ball should still be rolling).
+                TickRollsMethod.Invoke(controller, new object[] { 1f / 60f });
+
+                // The ball's LinearVelocity in the physics world must now reflect the +X
+                // rolling velocity, not the default zero it was initialised with.
+                var lv = world.Balls[0].LinearVelocity;
+                Assert.Greater(lv.X.ToFloat(), 0f,
+                    "LinearVelocity.X must be positive (rolling in +X) after TickRolls.");
+                Assert.AreEqual(0f, lv.Y.ToFloat(), 1e-5f,
+                    "LinearVelocity.Y must be zero (straight +X path).");
+
+                // Angular velocity must satisfy the no-slip constraint: ω.Y = Lv.X / r.
+                var av = world.Balls[0].AngularVelocity;
+                float expectedOmegaY = lv.X.ToFloat() / ballRadius;
+                Assert.AreEqual(expectedOmegaY, av.Y.ToFloat(), 1e-4f,
+                    "AngularVelocity.Y must equal LinearVelocity.X / radius (no-slip).");
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        /// <summary>
+        /// When a roll animation completes (ball reaches the end waypoint),
+        /// <see cref="BallDropController"/> must zero <see cref="Ball.LinearVelocity"/>
+        /// and <see cref="Ball.AngularVelocity"/> in the authoritative
+        /// <see cref="PhysicsWorld2D.Balls"/> array so the physics world reflects the
+        /// ball's stationary state.
+        /// </summary>
+        [Test]
+        public void TickRolls_WhenStopped_VelocityIsZeroedInPhysicsWorldArray()
+        {
+            var go = new GameObject();
+            try
+            {
+                var controller = go.AddComponent<BallDropController>();
+
+                // Create and bind a physics world with the ball.
+                var world = new PhysicsWorld2D();
+                var ball  = new Ball(0); // AddBall assigns Id = 0
+                world.AddBall(ball);
+                controller.BindPhysicsWorld(world);
+
+                int   ballId     = world.Balls[0].Id;
+                float ballRadius = world.Balls[0].Radius.ToFloat();
+
+                // Give the ball a non-zero velocity so we can verify it is zeroed.
+                world.Balls[0].LinearVelocity  = new FixVec2(Fix64.One, Fix64.Zero);
+                world.Balls[0].AngularVelocity = new FixVec3(Fix64.Zero, Fix64.One, Fix64.Zero);
+
+                // Short path: 0.1 units at 0.5 u/s completes in 0.2 s.
+                var activeRolls = ActiveRollsField.GetValue(controller) as List<ActiveRoll>;
+                activeRolls.Add(new ActiveRoll
+                {
+                    BallId          = ballId,
+                    BallRadius      = ballRadius,
+                    CurrentPosition = new Vector3(0f, 0f, 0f),
+                    Waypoints       = new[] { new Vector3(0f, 0f, 0f), new Vector3(0.1f, 0f, 0f) },
+                    SegIdx          = 0,
+                    SegT            = 0f,
+                    Speed           = 0.5f,
+                    Rotation        = Quaternion.identity,
+                });
+
+                // Advance with more than enough time to finish the roll.
+                TickRollsMethod.Invoke(controller, new object[] { 1.0f });
+
+                // Both velocity fields must be zero in the physics array.
+                Assert.AreEqual(FixVec2.Zero, world.Balls[0].LinearVelocity,
+                    "LinearVelocity must be zero in PhysicsWorld2D after roll completes.");
+                Assert.AreEqual(FixVec3.Zero, world.Balls[0].AngularVelocity,
+                    "AngularVelocity must be zero in PhysicsWorld2D after roll completes.");
+            }
+            finally { Object.DestroyImmediate(go); }
         }
     }
 }

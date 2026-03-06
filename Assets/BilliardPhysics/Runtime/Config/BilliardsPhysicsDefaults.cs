@@ -36,7 +36,7 @@ namespace BilliardPhysics
         /// For <see cref="Ball_Mass"/> = 1.7, this corresponds to Δv ≈ 80:
         /// J_max = 80 × 1.7 = 136.
         /// </summary>
-        public static readonly Fix64 ApplyCueStrike_StrengthMax = Fix64.From(136);
+        public static readonly Fix64 ApplyCueStrike_StrengthMax = Fix64.From(186);
 
         /// <summary>
         /// Ball speed threshold below which a ball whose centre is inside
@@ -57,6 +57,6 @@ namespace BilliardPhysics
         /// </summary>
         public static readonly Fix64 PocketRimRestitution = Fix64.FromFloat(0.02f, 4);
 
-        public static readonly Fix64 SpinParam = Fix64.FromFloat(0.1f);
+        public static readonly Fix64 SpinParam = Fix64.FromFloat(0.01f);
     }
 }
