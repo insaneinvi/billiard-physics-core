@@ -488,8 +488,13 @@ namespace BilliardPhysics
         }
 
         /// <summary>
-        /// Overload for callers that use a <see cref="List{T}"/> of balls (e.g. test helpers).
-        /// Delegates to the array overload.
+        /// Backward-compatibility overload for callers that use a <see cref="List{T}"/> of
+        /// balls (e.g. test helpers that pre-date the Ball[] migration).
+        /// <br/>
+        /// <b>NOTE:</b> This overload calls <see cref="List{T}.ToArray"/> which performs a
+        /// heap allocation.  For production code (called every simulation step) prefer the
+        /// <c>Ball[], int ballCount</c> overload with the array managed by
+        /// <see cref="PhysicsWorld2D"/> to avoid per-step garbage.
         /// </summary>
         public static TOIResult FindEarliestCollision(
             List<Ball>    balls,
