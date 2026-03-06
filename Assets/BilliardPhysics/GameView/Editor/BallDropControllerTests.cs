@@ -438,5 +438,137 @@ namespace BilliardPhysics.Tests
             }
             finally { Object.DestroyImmediate(go); }
         }
+
+        // ── CancelBallAnimation: stops active drop ────────────────────────────────
+
+        private static FieldInfo ActiveDropsField => typeof(BallDropController)
+            .GetField("_activeDrops", BindingFlags.NonPublic | BindingFlags.Instance);
+
+        private static FieldInfo ActiveRollsField => typeof(BallDropController)
+            .GetField("_activeRolls", BindingFlags.NonPublic | BindingFlags.Instance);
+
+        private static MethodInfo TickRollsMethod => typeof(BallDropController)
+            .GetMethod("TickRolls", BindingFlags.NonPublic | BindingFlags.Instance);
+
+        /// <summary>
+        /// <see cref="BallDropController.CancelBallAnimation"/> must remove the entry from
+        /// the active-drop list so the drop animation stops immediately and no further
+        /// <see cref="BallDropController.OnBallAnimationUpdate"/> callbacks are fired.
+        /// </summary>
+        [Test]
+        public void CancelBallAnimation_ActiveDrop_IsRemovedFromActiveDrops()
+        {
+            var go = new GameObject();
+            try
+            {
+                var controller = go.AddComponent<BallDropController>();
+
+                // Set up a pocketed ball and start a drop animation.
+                var ball = new Ball(7);
+                ball.Position        = new FixVec2(Fix64.FromFloat(-1f), Fix64.Zero);
+                ball.LinearVelocity  = new FixVec2(Fix64.FromFloat(2f),  Fix64.Zero);
+                ball.IsPocketed      = true;
+                ball.LastAngularVelocity = FixVec3.Zero;
+                ball.AngularVelocity     = FixVec3.Zero;
+
+                controller.OnBallPocketed(ball, new Vector3(0f, 0f, 0f), null);
+
+                var activeDrops = ActiveDropsField.GetValue(controller) as System.Collections.ICollection;
+                Assert.AreEqual(1, activeDrops.Count,
+                    "One drop must be active after OnBallPocketed.");
+
+                // Cancel the animation and verify it was removed.
+                controller.CancelBallAnimation(ball.Id);
+
+                Assert.AreEqual(0, activeDrops.Count,
+                    "No drops must remain after CancelBallAnimation.");
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        /// <summary>
+        /// <see cref="BallDropController.CancelBallAnimation"/> must also remove any active
+        /// roll entry for the ball, preventing further position updates after cancellation.
+        /// </summary>
+        [Test]
+        public void CancelBallAnimation_ActiveRoll_IsRemovedFromActiveRolls()
+        {
+            var go = new GameObject();
+            try
+            {
+                var controller = go.AddComponent<BallDropController>();
+
+                var ball = new Ball(5);
+                ball.IsPocketed = true;
+
+                // Inject an ActiveRoll directly into the controller's internal list.
+                var activeRolls = ActiveRollsField.GetValue(controller)
+                    as List<ActiveRoll>;
+                activeRolls.Add(new ActiveRoll
+                {
+                    BallData        = ball,
+                    CurrentPosition = new Vector3(0f, 0f, 0f),
+                    Waypoints       = new[] { new Vector3(0f, 0f, 0f), new Vector3(5f, 0f, 0f) },
+                    SegIdx          = 0,
+                    SegT            = 0f,
+                    Speed           = 0.5f,
+                    Rotation        = Quaternion.identity,
+                });
+
+                Assert.AreEqual(1, activeRolls.Count,
+                    "One roll must be active before cancellation.");
+
+                controller.CancelBallAnimation(ball.Id);
+
+                Assert.AreEqual(0, activeRolls.Count,
+                    "No rolls must remain after CancelBallAnimation.");
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
+
+        /// <summary>
+        /// When a roll animation reaches the end waypoint, <see cref="BallDropController"/>
+        /// must invoke <see cref="BallDropController.OnBallHide"/> with the ball's ID so
+        /// the presentation layer can hide the ball.
+        ///
+        /// Regression test for the missing <c>OnBallHide</c> call in
+        /// <c>TickRolls</c> when the roll animation completes.
+        /// </summary>
+        [Test]
+        public void TickRolls_WhenRollCompletes_InvokesOnBallHide()
+        {
+            var go = new GameObject();
+            try
+            {
+                var controller = go.AddComponent<BallDropController>();
+
+                int hiddenBallId = -1;
+                controller.OnBallHide += id => hiddenBallId = id;
+
+                var ball = new Ball(3);
+                ball.IsPocketed = true;
+
+                // Inject an ActiveRoll with a short path (0.1 units at 0.5 u/s → 0.2 s to complete).
+                var activeRolls = ActiveRollsField.GetValue(controller)
+                    as List<ActiveRoll>;
+                activeRolls.Add(new ActiveRoll
+                {
+                    BallData        = ball,
+                    CurrentPosition = new Vector3(0f, 0f, 0f),
+                    Waypoints       = new[] { new Vector3(0f, 0f, 0f), new Vector3(0.1f, 0f, 0f) },
+                    SegIdx          = 0,
+                    SegT            = 0f,
+                    Speed           = 0.5f,
+                    Rotation        = Quaternion.identity,
+                });
+
+                // Advance with more than enough time to finish the roll.
+                TickRollsMethod.Invoke(controller, new object[] { 1.0f });
+
+                Assert.AreEqual(ball.Id, hiddenBallId,
+                    "OnBallHide must be invoked with the ball's ID when its roll animation completes.");
+            }
+            finally { Object.DestroyImmediate(go); }
+        }
     }
 }
