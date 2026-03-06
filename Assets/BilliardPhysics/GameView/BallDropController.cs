@@ -374,6 +374,13 @@ public class BallDropController : MonoBehaviour
                 path.ConnectionPoints[k].x, path.ConnectionPoints[k].y, z);
         waypoints[cpCount + 1] = new Vector3(path.End.x, path.End.y, z);
 
+        // When two or more balls are pocketed simultaneously they each call StartRoll
+        // in the same frame and would otherwise begin at the identical waypoints[0]
+        // position.  Push the new ball's start backwards along the path (away from
+        // waypoints[1]) so it does not overlap any ball that is already rolling or
+        // already stopped on the path.
+        AdjustRollStartForOverlap(waypoints, ball.Radius.ToFloat());
+
         // Assign a random roll-direction angle at Start so each ball begins the path
         // with a unique visual orientation.  The angle is a random rotation around the
         // Z-axis (table normal), making every ball look like it arrived from a different
@@ -399,6 +406,67 @@ public class BallDropController : MonoBehaviour
             Speed           = RollSpeed,
             Rotation        = startRotation,
         });
+    }
+
+    // ── Internal: prevent start-position overlap for simultaneous pocketings ──
+
+    /// <summary>
+    /// Adjusts <paramref name="waypoints"/>[0] so that the proposed roll-start does not
+    /// overlap any ball that is already rolling or already stopped on the post-pocket path.
+    ///
+    /// <para>When two or more balls are pocketed in the same frame they all attempt to
+    /// begin rolling from <c>waypoints[0]</c> (= <c>path.Start</c>).  Without this
+    /// adjustment the duplicate start positions cause the balls to stack on top of each
+    /// other and roll as a single visual object.</para>
+    ///
+    /// <para>The method iterates until no overlap remains, correctly handling three or
+    /// more simultaneous pocketings.  Each overlapping ball pushes the new start one
+    /// full contact-length backwards (opposite to the forward path direction).</para>
+    /// </summary>
+    internal void AdjustRollStartForOverlap(Vector3[] waypoints, float selfRadius)
+    {
+        if (waypoints.Length < 2) return;
+
+        // "Forward" is the initial path direction (waypoints[0] → waypoints[1]).
+        // We push the start in the *reverse* direction so the new ball trails behind
+        // any blocking ball, maintaining exactly one contact-length of separation.
+        Vector3 forward = waypoints[1] - waypoints[0];
+        if (forward.sqrMagnitude < 1e-8f) return;
+        forward.Normalize();
+
+        bool adjusted;
+        do
+        {
+            adjusted = false;
+            Vector3 start = waypoints[0];
+
+            // Check against balls that have already stopped on the path.
+            foreach (var (stoppedPos, stoppedRadius) in _stoppedBalls)
+            {
+                float contactDist = selfRadius + stoppedRadius;
+                if ((start - stoppedPos).sqrMagnitude < contactDist * contactDist)
+                {
+                    waypoints[0] = stoppedPos - forward * contactDist;
+                    adjusted = true;
+                    break;
+                }
+            }
+
+            if (adjusted) continue;
+
+            // Check against balls that are currently rolling (not yet stopped).
+            foreach (ActiveRoll other in _activeRolls)
+            {
+                float otherRadius = other.BallData.Radius.ToFloat();
+                float contactDist = selfRadius + otherRadius;
+                if ((start - other.CurrentPosition).sqrMagnitude < contactDist * contactDist)
+                {
+                    waypoints[0] = other.CurrentPosition - forward * contactDist;
+                    adjusted = true;
+                    break;
+                }
+            }
+        } while (adjusted);
     }
 
     // ── Internal: drive active roll animations ────────────────────────────────
