@@ -28,6 +28,7 @@ public class BilliardWorld : MonoBehaviour
     private Dictionary<int, Quaternion> _ballRotations;
 
     private Ball cueBall;
+    private Vector2 _cueBallStartPosition;
     private PhysicsWorld2D _physicsWorld;
     private SegmentData dropBallRollPath;
     
@@ -229,6 +230,7 @@ public class BilliardWorld : MonoBehaviour
 
         cueBall = new Ball(0, BilliardsPhysicsDefaults.Ball_Radius, BilliardsPhysicsDefaults.Ball_Mass);
         cueBall.Position = new FixVec2(Fix64.FromFloat(rackResult.CueBall.Position.x),  Fix64.FromFloat(rackResult.CueBall.Position.y));
+        _cueBallStartPosition = new Vector2(rackResult.CueBall.Position.x, rackResult.CueBall.Position.y);
         _physicsWorld.AddBall(cueBall);
         
         foreach (var ob in rackResult.ObjectBalls)
@@ -294,12 +296,49 @@ public class BilliardWorld : MonoBehaviour
         var cbml =  IsAllBallMotionless();
         if (!isAllBallMotionless && cbml)
         {
+            if (cueBall.IsPocketed)
+                RespawnCueBall();
             UpdateAllBallsPositionInfo();
             UpdateCueState(true);
         }
         isAllBallMotionless = cbml;
         if(!isAllBallMotionless)
             UpdateAllBallsPositionInfo();
+    }
+
+    /// <summary>
+    /// Resets the cue ball to its default starting position after being pocketed.
+    /// Cancels any ongoing drop/roll animation, un-pockets the ball in physics,
+    /// and re-activates its view GameObject.
+    /// </summary>
+    private void RespawnCueBall()
+    {
+        // Cancel any ongoing pocket-drop or roll animation so it does not
+        // overwrite the respawn position via OnBallAnimationUpdate callbacks.
+        ballDropController.CancelBallAnimation(cueBall.Id);
+
+        // Reset physics state: clears IsPocketed, zeros velocities, sets IsMotionless = true.
+        cueBall.Reset();
+
+        // Place the cue ball at its default starting position.
+        cueBall.Position = new FixVec2(
+            Fix64.FromFloat(_cueBallStartPosition.x),
+            Fix64.FromFloat(_cueBallStartPosition.y));
+
+        // Re-activate the ball's view GameObject and reset its visual state.
+        if (ballDict.TryGetValue(cueBall.Id, out GameObject ballObj))
+        {
+            ballObj.SetActive(true);
+            ballObj.transform.position = new Vector3(
+                cueBall.Position.X.ToFloat(),
+                cueBall.Position.Y.ToFloat(),
+                -BallRackHelper.HalfBallDiameter);
+            _ballRotations[cueBall.Id] = Quaternion.identity;
+            ballObj.transform.rotation = Quaternion.identity;
+        }
+
+        if (ballShadowDict.TryGetValue(cueBall.Id, out GameObject shadowObj))
+            shadowObj.SetActive(true);
     }
 
     private void UpdateAllBallsPositionInfo()

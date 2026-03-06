@@ -221,6 +221,33 @@ public class BallDropController : MonoBehaviour
     /// </summary>
     public void ClearPocketedBalls() => _stoppedBalls.Clear();
 
+    /// <summary>
+    /// Immediately cancels any active drop or roll animation for the ball with the
+    /// given <paramref name="ballId"/>.  The presentation layer will receive no further
+    /// <see cref="OnBallAnimationUpdate"/> callbacks for that ball after this call.
+    ///
+    /// <para>Call this before respawning a ball to prevent a still-running animation
+    /// from overwriting the new position via <see cref="OnBallAnimationUpdate"/>.</para>
+    /// </summary>
+    /// <param name="ballId">The <see cref="Ball.Id"/> of the ball to cancel.</param>
+    public void CancelBallAnimation(int ballId)
+    {
+        for (int i = _activeDrops.Count - 1; i >= 0; i--)
+        {
+            if (_activeDrops[i].BallData.Id == ballId)
+            {
+                _pool.Return(_activeDrops[i].Helper);
+                _activeDrops.RemoveAt(i);
+                break;
+            }
+        }
+        for (int i = _activeRolls.Count - 1; i >= 0; i--)
+        {
+            if (_activeRolls[i].BallData.Id == ballId)
+                _activeRolls.RemoveAt(i);
+        }
+    }
+
     // ── MonoBehaviour ─────────────────────────────────────────────────────────
 
     private void Update()
@@ -505,6 +532,7 @@ public class BallDropController : MonoBehaviour
                 roll.BallData.AngularVelocity = FixVec3.Zero;
 
                 // Notify the presentation layer to hide the ball (or return it to a pool).
+                OnBallHide?.Invoke(roll.BallData.Id);
                 _activeRolls.RemoveAt(i);
             }
         }
